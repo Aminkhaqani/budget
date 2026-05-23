@@ -1,0 +1,187 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Account types: bank, cash, credit_card, investment, savings
+model Account {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // bank, cash, credit_card, investment, savings
+  balance     Float    @default(0)
+  currency    String   @default("USD")
+  color       String?  // for UI display
+  icon        String?  // icon name for UI
+  isDefault   Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  transactions     Transaction[]
+  scheduledPayments ScheduledPayment[]
+  loansGiven       Loan[]    @relation("LoanFromAccount")
+  loansReceived    Loan[]    @relation("LoanToAccount")
+}
+
+model Category {
+  id          String   @id @default(cuid())
+  name        String
+  type        String   // income, expense
+  icon        String?
+  color       String?
+  budget      Float?   // monthly budget limit
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  transactions Transaction[]
+  scheduledPayments ScheduledPayment[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  type        String   // income, expense, transfer
+  amount      Float
+  description String?
+  date        DateTime @default(now())
+  
+  // Relations
+  accountId   String
+  account     Account  @relation(fields: [accountId], references: [id])
+  categoryId  String?
+  category    Category? @relation(fields: [categoryId], references: [id])
+  
+  // For transfers
+  toAccountId String?
+  
+  // Additional info
+  notes       String?
+  tags        String?  // comma-separated tags
+  isRecurring Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Contact - people or entities for loans/debts
+model Contact {
+  id          String   @id @default(cuid())
+  name        String
+  email       String?
+  phone       String?
+  notes       String?
+  type        String   @default("person") // person, company
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  loansAsLender  Loan[]  @relation("LoanLenderContact")
+  loansAsBorrower Loan[] @relation("LoanBorrowerContact")
+  debtsAsCreditor Debt[] @relation("DebtCreditor")
+  debtsAsDebtor   Debt[] @relation("DebtDebtor")
+}
+
+// Loans - money lent to others or borrowed from others
+model Loan {
+  id              String   @id @default(cuid())
+  type            String   // given (I lent money), taken (I borrowed money)
+  principalAmount Float    // original loan amount
+  interestRate    Float?   // annual interest rate percentage
+  startDate       DateTime
+  dueDate         DateTime?
+  status          String   @default("active") // active, paid, defaulted
+  description     String?
+  
+  // My account involved
+  fromAccountId   String?  // account money came from (for loans given)
+  fromAccount     Account? @relation("LoanFromAccount", fields: [fromAccountId], references: [id])
+  toAccountId     String?  // account money went to (for loans taken)
+  toAccount       Account? @relation("LoanToAccount", fields: [toAccountId], references: [id])
+  
+  // The other party
+  lenderContactId   String?
+  lenderContact     Contact? @relation("LoanLenderContact", fields: [lenderContactId], references: [id])
+  borrowerContactId String?
+  borrowerContact   Contact? @relation("LoanBorrowerContact", fields: [borrowerContactId], references: [id])
+  
+  payments        LoanPayment[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model LoanPayment {
+  id          String   @id @default(cuid())
+  amount      Float
+  date        DateTime @default(now())
+  principal   Float    @default(0) // portion going to principal
+  interest    Float    @default(0) // portion going to interest
+  notes       String?
+  
+  loanId      String
+  loan        Loan     @relation(fields: [loanId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Debts - money I owe or money owed to me
+model Debt {
+  id              String   @id @default(cuid())
+  type            String   // payable (I owe), receivable (owed to me)
+  amount          Float    // total amount
+  remainingAmount Float    // remaining balance
+  dueDate         DateTime?
+  status          String   @default("pending") // pending, partial, paid
+  description     String?
+  
+  // The other party
+  creditorId      String?  // who I owe (for payable)
+  creditor        Contact? @relation("DebtCreditor", fields: [creditorId], references: [id])
+  debtorId        String?  // who owes me (for receivable)
+  debtor          Contact? @relation("DebtDebtor", fields: [debtorId], references: [id])
+  
+  payments        DebtPayment[]
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model DebtPayment {
+  id          String   @id @default(cuid())
+  amount      Float
+  date        DateTime @default(now())
+  notes       String?
+  
+  debtId      String
+  debt        Debt     @relation(fields: [debtId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Scheduled/Recurring Payments
+model ScheduledPayment {
+  id            String   @id @default(cuid())
+  name          String
+  type          String   // income, expense
+  amount        Float
+  frequency     String   // daily, weekly, monthly, yearly, custom
+  customDays    Int?     // for custom frequency
+  startDate     DateTime
+  endDate       DateTime?
+  nextDueDate   DateTime
+  lastProcessed DateTime?
+  isActive      Boolean  @default(true)
+  autoRecord    Boolean  @default(false) // auto-create transactions
+  description   String?
+  
+  // Relations
+  accountId     String
+  account       Account  @relation(fields: [accountId], references: [id])
+  categoryId    String?
+  category      Category? @relation(fields: [categoryId], references: [id])
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
