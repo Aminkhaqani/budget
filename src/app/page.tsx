@@ -167,6 +167,7 @@ export default function BudgetApp() {
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isLoading, setIsLoading] = useState(true)
   const [period, setPeriod] = useState<'month' | 'season' | 'year'>('month')
+  const [chartType, setChartType] = useState<'expense' | 'income'>('expense')
   
   // Data states
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -352,6 +353,21 @@ export default function BudgetApp() {
       return { name: cat.name, value: total, color: cat.color || '#3b82f6' }
     })
     .filter(d => d.value > 0)
+
+  // Chart data for income by category
+  const incomeByCategory = categories
+    .filter(c => c.type === 'income')
+    .map(cat => {
+      const total = transactions
+        .filter(t => t.categoryId === cat.id && t.type === 'income' && isWithinInterval(new Date(t.date), currentPeriod))
+        .reduce((sum, t) => sum + t.amount, 0)
+      return { name: cat.name, value: total, color: cat.color || '#10b981' }
+    })
+    .filter(d => d.value > 0)
+
+  // Current chart data based on selection
+  const chartData = chartType === 'expense' ? expensesByCategory : incomeByCategory
+  const chartTotal = chartData.reduce((sum, d) => sum + d.value, 0)
 
   // Loan calculations
   const totalLoansGiven = loans.filter(l => l.type === 'given' && l.status === 'active')
@@ -782,15 +798,15 @@ export default function BudgetApp() {
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
           {/* Dashboard Tab */}
           <TabsContent value="dashboard" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
-            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+            <div className="h-full flex flex-col p-3 gap-2 overflow-hidden">
               {/* Period Selector */}
-              <div className="flex-shrink-0 flex gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+              <div className="flex-shrink-0 flex gap-1 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
                 {(['month', 'season', 'year'] as const).map(p => (
                   <Button
                     key={p}
                     variant={period === p ? 'default' : 'ghost'}
                     size="sm"
-                    className={`flex-1 rounded-lg text-sm ${period === p ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : ''}`}
+                    className={`flex-1 rounded text-xs h-7 ${period === p ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : ''}`}
                     onClick={() => setPeriod(p)}
                   >
                     {p === 'month' ? 'Month' : p === 'season' ? 'Season' : 'Year'}
@@ -798,42 +814,41 @@ export default function BudgetApp() {
                 ))}
               </div>
 
-              {/* Balance Cards */}
-              <div className="flex-shrink-0 space-y-3">
-                {/* Main Balance Card */}
-                <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-0 shadow-lg">
-                  <CardContent className="p-5">
-                    <p className="text-emerald-100 text-sm font-medium">Total Balance</p>
-                    <p className="text-3xl font-bold mt-1">{formatCurrency(totalBalance)}</p>
-                    <div className="flex items-center gap-4 mt-3 text-sm">
+              {/* Section 1: Balance Cards - 1/3 of screen */}
+              <div className="flex-[0.33] flex flex-col gap-2 min-h-0">
+                {/* Balance Card */}
+                <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-0 shadow-md flex-1">
+                  <CardContent className="p-3 h-full flex flex-col justify-center">
+                    <p className="text-emerald-100 text-xs font-medium">Total Balance</p>
+                    <p className="text-2xl font-bold mt-0.5">{formatCurrency(totalBalance)}</p>
+                    <div className="flex items-center gap-3 mt-1 text-xs">
                       <span className="text-emerald-100">{accounts.length} accounts</span>
                     </div>
                   </CardContent>
                 </Card>
 
                 {/* Income & Expenses Cards */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2 flex-1">
                   <Card className="bg-white dark:bg-slate-900 border shadow-sm">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
-                          <TrendingUp className="w-4 h-4 text-blue-600" />
+                    <CardContent className="p-2 h-full flex flex-col justify-center">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <div className="w-6 h-6 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                          <TrendingUp className="w-3 h-3 text-blue-600" />
                         </div>
-                        <span className="text-xs text-slate-500">Income</span>
+                        <span className="text-[10px] text-slate-500">Income</span>
                       </div>
-                      <p className="text-xl font-bold text-blue-600">{formatCurrency(currentIncome)}</p>
-                      <div className="flex items-center gap-1 mt-2 text-xs">
+                      <p className="text-lg font-bold text-blue-600">{formatCurrency(currentIncome)}</p>
+                      <div className="flex items-center gap-1 text-[10px]">
                         {previousIncome > 0 && (
                           <>
                             {incomeChange >= 0 ? (
-                              <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                              <ArrowUpRight className="w-2.5 h-2.5 text-emerald-500" />
                             ) : (
-                              <ArrowDownRight className="w-3 h-3 text-red-500" />
+                              <ArrowDownRight className="w-2.5 h-2.5 text-red-500" />
                             )}
                             <span className={incomeChange >= 0 ? 'text-emerald-500' : 'text-red-500'}>
                               {Math.abs(incomeChange).toFixed(0)}%
                             </span>
-                            <span className="text-slate-400">vs prev</span>
                           </>
                         )}
                       </div>
@@ -841,83 +856,150 @@ export default function BudgetApp() {
                   </Card>
 
                   <Card className="bg-white dark:bg-slate-900 border shadow-sm">
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
-                          <TrendingDown className="w-4 h-4 text-amber-600" />
+                    <CardContent className="p-2 h-full flex flex-col justify-center">
+                      <div className="flex items-center gap-1.5 mb-1">
+                        <div className="w-6 h-6 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
+                          <TrendingDown className="w-3 h-3 text-amber-600" />
                         </div>
-                        <span className="text-xs text-slate-500">Expenses</span>
+                        <span className="text-[10px] text-slate-500">Expenses</span>
                       </div>
-                      <p className="text-xl font-bold text-amber-600">{formatCurrency(currentExpenses)}</p>
-                      <div className="flex items-center gap-1 mt-2 text-xs">
+                      <p className="text-lg font-bold text-amber-600">{formatCurrency(currentExpenses)}</p>
+                      <div className="flex items-center gap-1 text-[10px]">
                         {previousExpenses > 0 && (
                           <>
                             {expenseChange <= 0 ? (
-                              <ArrowDownRight className="w-3 h-3 text-emerald-500" />
+                              <ArrowDownRight className="w-2.5 h-2.5 text-emerald-500" />
                             ) : (
-                              <ArrowUpRight className="w-3 h-3 text-red-500" />
+                              <ArrowUpRight className="w-2.5 h-2.5 text-red-500" />
                             )}
                             <span className={expenseChange <= 0 ? 'text-emerald-500' : 'text-red-500'}>
                               {Math.abs(expenseChange).toFixed(0)}%
                             </span>
-                            <span className="text-slate-400">vs prev</span>
                           </>
                         )}
                       </div>
                     </CardContent>
                   </Card>
                 </div>
+              </div>
 
-                {/* Previous Period Summary */}
-                <Card className="bg-slate-100 dark:bg-slate-800 border-0">
-                  <CardContent className="p-3">
-                    <p className="text-xs text-slate-500 mb-2">Previous Period</p>
-                    <div className="grid grid-cols-2 gap-4 text-sm">
-                      <div>
-                        <span className="text-slate-500">Income:</span>
-                        <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">{formatCurrency(previousIncome)}</span>
+              {/* Section 2: Pie Chart - 1/3 of screen */}
+              <div className="flex-[0.34] flex flex-col min-h-0">
+                <Card className="h-full flex flex-col border shadow-sm">
+                  <CardContent className="flex-1 flex flex-col p-2 min-h-0">
+                    {/* Chart Type Toggle */}
+                    <div className="flex items-center justify-between mb-1 flex-shrink-0">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">By Category</span>
+                      <div className="flex gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-6 px-2 text-[10px] rounded ${chartType === 'expense' ? 'bg-white dark:bg-slate-700 shadow-sm' : ''}`}
+                          onClick={() => setChartType('expense')}
+                        >
+                          Expense
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className={`h-6 px-2 text-[10px] rounded ${chartType === 'income' ? 'bg-white dark:bg-slate-700 shadow-sm' : ''}`}
+                          onClick={() => setChartType('income')}
+                        >
+                          Income
+                        </Button>
                       </div>
-                      <div>
-                        <span className="text-slate-500">Expenses:</span>
-                        <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">{formatCurrency(previousExpenses)}</span>
-                      </div>
+                    </div>
+
+                    {/* Chart */}
+                    <div className="flex-1 min-h-0 relative">
+                      {chartData.length > 0 ? (
+                        <ChartContainer config={{}} className="h-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={chartData}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius="35%"
+                                outerRadius="65%"
+                                dataKey="value"
+                                paddingAngle={2}
+                              >
+                                {chartData.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </ChartContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-slate-400">
+                          <div className="text-center">
+                            <BarChart3 className="w-8 h-8 mx-auto mb-1" />
+                            <p className="text-xs">No data</p>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Center Text */}
+                      {chartData.length > 0 && (
+                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                          <div className="text-center">
+                            <p className="text-[10px] text-slate-500">Total</p>
+                            <p className="text-sm font-bold">{formatCurrency(chartTotal)}</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Legend */}
+                    <div className="flex-shrink-0 mt-1 flex flex-wrap gap-x-3 gap-y-1 justify-center">
+                      {chartData.slice(0, 4).map((cat, i) => (
+                        <div key={i} className="flex items-center gap-1">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                          <span className="text-[9px] text-slate-600 dark:text-slate-400 truncate max-w-[60px]">{cat.name}</span>
+                        </div>
+                      ))}
+                      {chartData.length > 4 && (
+                        <span className="text-[9px] text-slate-400">+{chartData.length - 4} more</span>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
               </div>
 
-              {/* Recent Transactions - Scrollable */}
-              <div className="flex-1 min-h-0">
-                <Card className="h-full flex flex-col">
-                  <CardContent className="flex-1 flex flex-col p-3 min-h-0">
-                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
-                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Recent Transactions</span>
-                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setActiveTab('transactions')}>
-                        View All <ChevronRight className="w-3 h-3" />
+              {/* Section 3: Recent Transactions - 1/3 of screen */}
+              <div className="flex-[0.33] flex flex-col min-h-0">
+                <Card className="h-full flex flex-col border shadow-sm">
+                  <CardContent className="flex-1 flex flex-col p-2 min-h-0">
+                    <div className="flex items-center justify-between mb-1 flex-shrink-0">
+                      <span className="text-xs font-medium text-slate-600 dark:text-slate-400">Recent Transactions</span>
+                      <Button variant="ghost" size="sm" className="h-5 text-[10px] px-1" onClick={() => setActiveTab('transactions')}>
+                        View All <ChevronRight className="w-2.5 h-2.5" />
                       </Button>
                     </div>
                     <ScrollArea className="flex-1">
                       {transactions.length === 0 ? (
-                        <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
-                          <Receipt className="w-10 h-10 mb-2" />
-                          <p className="text-sm">No transactions yet</p>
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400 py-4">
+                          <Receipt className="w-8 h-8 mb-1" />
+                          <p className="text-xs">No transactions yet</p>
                         </div>
                       ) : (
-                        <div className="space-y-2 pr-2">
-                          {transactions.slice(0, 10).map(t => (
-                            <div key={t.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
-                              <div className="flex items-center gap-3">
-                                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                        <div className="space-y-1.5 pr-1">
+                          {transactions.slice(0, 8).map(t => (
+                            <div key={t.id} className="flex items-center justify-between p-1.5 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                              <div className="flex items-center gap-2">
+                                <div className={`w-7 h-7 rounded-full flex items-center justify-center ${
                                   t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
                                 }`}>
-                                  {t.type === 'income' ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                                  {t.type === 'income' ? <ArrowUpRight className="w-3.5 h-3.5" /> : <ArrowDownRight className="w-3.5 h-3.5" />}
                                 </div>
                                 <div>
-                                  <p className="font-medium text-sm truncate max-w-[120px]">{t.description || 'Transaction'}</p>
-                                  <p className="text-xs text-slate-500">{format(new Date(t.date), 'MMM d')}</p>
+                                  <p className="font-medium text-xs truncate max-w-[100px]">{t.description || 'Transaction'}</p>
+                                  <p className="text-[10px] text-slate-500">{format(new Date(t.date), 'MMM d')}</p>
                                 </div>
                               </div>
-                              <p className={`font-semibold text-sm ${t.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                              <p className={`font-semibold text-xs ${t.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
                                 {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
                               </p>
                             </div>
