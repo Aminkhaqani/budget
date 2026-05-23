@@ -1,34 +1,31 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { format, startOfMonth, endOfMonth, subMonths, isWithinInterval, parseISO, addDays } from 'date-fns'
+import { format, startOfMonth, endOfMonth, subMonths, startOfQuarter, endOfQuarter, subQuarters, startOfYear, endOfYear, subYears, isWithinInterval } from 'date-fns'
 import { useToast } from '@/hooks/use-toast'
-import { db } from '@/lib/db'
 
 // UI Components
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
-import { Separator } from '@/components/ui/separator'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogClose } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer, LineChart, Line, Legend } from 'recharts'
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts'
 
 // Icons
 import { 
   Wallet, TrendingUp, TrendingDown, CreditCard, PiggyBank, ArrowUpRight, ArrowDownRight,
-  Plus, Minus, RefreshCw, Calendar, Clock, Users, Building, User, ChevronRight,
-  LayoutDashboard, Receipt, HandCoins, CalendarClock, Landmark, BarChart3, Settings,
-  Edit, Trash2, Eye, CheckCircle, AlertCircle, DollarSign, Banknote, ArrowRightLeft
+  Plus, RefreshCw, Calendar, Clock, Users, Building, User, ChevronRight, ChevronLeft,
+  HandCoins, CalendarClock, Landmark, BarChart3, Home, Receipt,
+  Edit, Trash2, DollarSign, Banknote, ArrowRightLeft, AlertCircle, X, Check
 } from 'lucide-react'
 
 // Types
@@ -147,6 +144,8 @@ const formatCurrency = (amount: number, currency: string = 'USD') => {
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currency,
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
   }).format(amount)
 }
 
@@ -163,10 +162,11 @@ const getAccountIcon = (type: string) => {
 
 const CHART_COLORS = ['#10b981', '#f59e0b', '#ef4444', '#3b82f6', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
 
-export default function PersonalFinanceApp() {
+export default function BudgetApp() {
   const { toast } = useToast()
   const [activeTab, setActiveTab] = useState('dashboard')
   const [isLoading, setIsLoading] = useState(true)
+  const [period, setPeriod] = useState<'month' | 'season' | 'year'>('month')
   
   // Data states
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -187,10 +187,9 @@ export default function PersonalFinanceApp() {
   
   // Editing states
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
-  const [editingAccount, setEditingAccount] = useState<Account | null>(null)
-  const [editingLoan, setEditingLoan] = useState<Loan | null>(null)
-  const [editingDebt, setEditingDebt] = useState<Debt | null>(null)
-  const [editingScheduled, setEditingScheduled] = useState<ScheduledPayment | null>(null)
+  
+  // Form errors
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({})
   
   // Form data
   const [transactionForm, setTransactionForm] = useState({
@@ -260,7 +259,6 @@ export default function PersonalFinanceApp() {
   const loadData = async () => {
     setIsLoading(true)
     try {
-      // Load all data in parallel
       const [accountsRes, categoriesRes, transactionsRes, loansRes, debtsRes, contactsRes, scheduledRes] = await Promise.all([
         fetch('/api/accounts'),
         fetch('/api/categories'),
@@ -291,22 +289,71 @@ export default function PersonalFinanceApp() {
     }
   }
 
-  // Calculate totals
-  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0)
-  
-  const currentMonth = {
-    start: startOfMonth(new Date()),
-    end: endOfMonth(new Date())
+  // Period calculations
+  const getPeriodRange = (p: 'month' | 'season' | 'year') => {
+    const now = new Date()
+    switch (p) {
+      case 'month':
+        return { start: startOfMonth(now), end: endOfMonth(now) }
+      case 'season':
+        return { start: startOfQuarter(now), end: endOfQuarter(now) }
+      case 'year':
+        return { start: startOfYear(now), end: endOfYear(now) }
+    }
   }
   
-  const monthlyIncome = transactions
-    .filter(t => t.type === 'income' && isWithinInterval(new Date(t.date), currentMonth))
+  const getPreviousPeriodRange = (p: 'month' | 'season' | 'year') => {
+    const now = new Date()
+    switch (p) {
+      case 'month':
+        const lastMonth = subMonths(now, 1)
+        return { start: startOfMonth(lastMonth), end: endOfMonth(lastMonth) }
+      case 'season':
+        const lastQuarter = subQuarters(now, 1)
+        return { start: startOfQuarter(lastQuarter), end: endOfQuarter(lastQuarter) }
+      case 'year':
+        const lastYear = subYears(now, 1)
+        return { start: startOfYear(lastYear), end: endOfYear(lastYear) }
+    }
+  }
+
+  // Calculate totals for current period
+  const currentPeriod = getPeriodRange(period)
+  const previousPeriod = getPreviousPeriodRange(period)
+  
+  const totalBalance = accounts.reduce((sum, acc) => sum + acc.balance, 0)
+  
+  const currentIncome = transactions
+    .filter(t => t.type === 'income' && isWithinInterval(new Date(t.date), currentPeriod))
     .reduce((sum, t) => sum + t.amount, 0)
   
-  const monthlyExpenses = transactions
-    .filter(t => t.type === 'expense' && isWithinInterval(new Date(t.date), currentMonth))
+  const currentExpenses = transactions
+    .filter(t => t.type === 'expense' && isWithinInterval(new Date(t.date), currentPeriod))
     .reduce((sum, t) => sum + t.amount, 0)
   
+  const previousIncome = transactions
+    .filter(t => t.type === 'income' && isWithinInterval(new Date(t.date), previousPeriod))
+    .reduce((sum, t) => sum + t.amount, 0)
+  
+  const previousExpenses = transactions
+    .filter(t => t.type === 'expense' && isWithinInterval(new Date(t.date), previousPeriod))
+    .reduce((sum, t) => sum + t.amount, 0)
+  
+  const incomeChange = previousIncome > 0 ? ((currentIncome - previousIncome) / previousIncome) * 100 : 0
+  const expenseChange = previousExpenses > 0 ? ((currentExpenses - previousExpenses) / previousExpenses) * 100 : 0
+
+  // Chart data for expenses by category
+  const expensesByCategory = categories
+    .filter(c => c.type === 'expense')
+    .map(cat => {
+      const total = transactions
+        .filter(t => t.categoryId === cat.id && t.type === 'expense' && isWithinInterval(new Date(t.date), currentPeriod))
+        .reduce((sum, t) => sum + t.amount, 0)
+      return { name: cat.name, value: total, color: cat.color || '#3b82f6' }
+    })
+    .filter(d => d.value > 0)
+
+  // Loan calculations
   const totalLoansGiven = loans.filter(l => l.type === 'given' && l.status === 'active')
     .reduce((sum, l) => {
       const paid = l.payments.reduce((s, p) => s + p.principal, 0)
@@ -325,32 +372,38 @@ export default function PersonalFinanceApp() {
   const totalDebtsReceivable = debts.filter(d => d.type === 'receivable' && d.status !== 'paid')
     .reduce((sum, d) => sum + d.remainingAmount, 0)
 
-  // Chart data
-  const expensesByCategory = categories
-    .filter(c => c.type === 'expense')
-    .map(cat => {
-      const total = transactions
-        .filter(t => t.categoryId === cat.id && t.type === 'expense' && isWithinInterval(new Date(t.date), currentMonth))
-        .reduce((sum, t) => sum + t.amount, 0)
-      return { name: cat.name, value: total, color: cat.color || '#3b82f6' }
-    })
-    .filter(d => d.value > 0)
-  
-  const last6Months = Array.from({ length: 6 }, (_, i) => {
-    const month = subMonths(new Date(), 5 - i)
-    const start = startOfMonth(month)
-    const end = endOfMonth(month)
-    const income = transactions
-      .filter(t => t.type === 'income' && isWithinInterval(new Date(t.date), { start, end }))
-      .reduce((sum, t) => sum + t.amount, 0)
-    const expense = transactions
-      .filter(t => t.type === 'expense' && isWithinInterval(new Date(t.date), { start, end }))
-      .reduce((sum, t) => sum + t.amount, 0)
-    return { month: format(month, 'MMM'), income, expense }
-  })
+  // Validation function for transaction form
+  const validateTransactionForm = () => {
+    const errors: Record<string, string> = {}
+    
+    if (!transactionForm.date) {
+      errors.date = 'Date is required'
+    }
+    if (!transactionForm.categoryId) {
+      errors.category = 'Category is required'
+    }
+    if (!transactionForm.amount || parseFloat(transactionForm.amount) <= 0) {
+      errors.amount = 'Amount must be greater than 0'
+    }
+    if (!transactionForm.accountId) {
+      errors.account = 'Account is required'
+    }
+    
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }
 
   // CRUD Operations
   const handleAddTransaction = async () => {
+    if (!validateTransactionForm()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields: Date, Category, and Amount',
+        variant: 'destructive'
+      })
+      return
+    }
+    
     try {
       const response = await fetch('/api/transactions', {
         method: 'POST',
@@ -375,6 +428,15 @@ export default function PersonalFinanceApp() {
   
   const handleUpdateTransaction = async () => {
     if (!editingTransaction) return
+    if (!validateTransactionForm()) {
+      toast({
+        title: 'Validation Error',
+        description: 'Please fill in all required fields: Date, Category, and Amount',
+        variant: 'destructive'
+      })
+      return
+    }
+    
     try {
       const response = await fetch(`/api/transactions/${editingTransaction.id}`, {
         method: 'PUT',
@@ -411,6 +473,11 @@ export default function PersonalFinanceApp() {
   }
   
   const handleAddAccount = async () => {
+    if (!accountForm.name) {
+      toast({ title: 'Error', description: 'Account name is required', variant: 'destructive' })
+      return
+    }
+    
     try {
       const response = await fetch('/api/accounts', {
         method: 'POST',
@@ -445,6 +512,11 @@ export default function PersonalFinanceApp() {
   }
   
   const handleAddLoan = async () => {
+    if (!loanForm.principalAmount || parseFloat(loanForm.principalAmount) <= 0) {
+      toast({ title: 'Error', description: 'Amount is required', variant: 'destructive' })
+      return
+    }
+    
     try {
       const response = await fetch('/api/loans', {
         method: 'POST',
@@ -482,6 +554,11 @@ export default function PersonalFinanceApp() {
   }
   
   const handleAddDebt = async () => {
+    if (!debtForm.amount || parseFloat(debtForm.amount) <= 0) {
+      toast({ title: 'Error', description: 'Amount is required', variant: 'destructive' })
+      return
+    }
+    
     try {
       const response = await fetch('/api/debts', {
         method: 'POST',
@@ -518,6 +595,11 @@ export default function PersonalFinanceApp() {
   }
   
   const handleAddScheduled = async () => {
+    if (!scheduledForm.name || !scheduledForm.amount) {
+      toast({ title: 'Error', description: 'Name and amount are required', variant: 'destructive' })
+      return
+    }
+    
     try {
       const response = await fetch('/api/scheduled-payments', {
         method: 'POST',
@@ -555,6 +637,11 @@ export default function PersonalFinanceApp() {
   }
   
   const handleAddContact = async () => {
+    if (!contactForm.name) {
+      toast({ title: 'Error', description: 'Contact name is required', variant: 'destructive' })
+      return
+    }
+    
     try {
       const response = await fetch('/api/contacts', {
         method: 'POST',
@@ -585,6 +672,7 @@ export default function PersonalFinanceApp() {
       notes: '',
       tags: ''
     })
+    setFormErrors({})
   }
   
   const resetAccountForm = () => {
@@ -633,7 +721,7 @@ export default function PersonalFinanceApp() {
     setContactForm({ name: '', email: '', phone: '', type: 'person', notes: '' })
   }
 
-  // Open edit dialogs
+  // Open edit transaction dialog
   const openEditTransaction = (transaction: Transaction) => {
     setEditingTransaction(transaction)
     setTransactionForm({
@@ -646,6 +734,7 @@ export default function PersonalFinanceApp() {
       notes: transaction.notes || '',
       tags: transaction.tags || ''
     })
+    setFormErrors({})
     setShowTransactionDialog(true)
   }
 
@@ -663,501 +752,205 @@ export default function PersonalFinanceApp() {
     }
   }, [accounts])
 
+  // Navigate home
+  const goHome = () => setActiveTab('dashboard')
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-950 dark:to-slate-900 pb-20 md:pb-6">
+    <div className="h-screen flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden">
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-white/80 dark:bg-slate-900/80 backdrop-blur-md border-b">
-        <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
-              <Wallet className="w-5 h-5 text-white" />
-            </div>
-            <h1 className="text-xl font-bold bg-gradient-to-r from-emerald-600 to-teal-600 bg-clip-text text-transparent">
-              FinTrack
-            </h1>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="ghost" size="icon" onClick={loadData}>
-              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+      <header className="flex-shrink-0 bg-white dark:bg-slate-900 border-b px-4 py-2 flex items-center justify-between z-40">
+        <div className="flex items-center gap-2">
+          {activeTab !== 'dashboard' && (
+            <Button variant="ghost" size="icon" onClick={goHome} className="h-8 w-8">
+              <ChevronLeft className="w-5 h-5" />
             </Button>
+          )}
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center">
+              <Wallet className="w-4 h-4 text-white" />
+            </div>
+            <h1 className="text-lg font-bold text-slate-800 dark:text-white">Budget</h1>
           </div>
         </div>
+        <Button variant="ghost" size="icon" onClick={loadData} className="h-8 w-8">
+          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+        </Button>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 py-4">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsContent value="dashboard" className="space-y-4 mt-0">
-            {/* Overview Cards */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-              <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white border-0">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-emerald-100 text-xs font-medium">Total Balance</p>
-                    <Wallet className="w-4 h-4 text-emerald-200" />
-                  </div>
-                  <p className="text-2xl font-bold mt-1">{formatCurrency(totalBalance)}</p>
-                  <p className="text-emerald-100 text-xs mt-1">{accounts.length} accounts</p>
-                </CardContent>
-              </Card>
-              
-              <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-0">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-blue-100 text-xs font-medium">Monthly Income</p>
-                    <TrendingUp className="w-4 h-4 text-blue-200" />
-                  </div>
-                  <p className="text-2xl font-bold mt-1">{formatCurrency(monthlyIncome)}</p>
-                  <p className="text-blue-100 text-xs mt-1">{format(new Date(), 'MMMM yyyy')}</p>
-                </CardContent>
-              </Card>
-              
-              <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white border-0">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-amber-100 text-xs font-medium">Monthly Expenses</p>
-                    <TrendingDown className="w-4 h-4 text-amber-200" />
-                  </div>
-                  <p className="text-2xl font-bold mt-1">{formatCurrency(monthlyExpenses)}</p>
-                  <p className="text-amber-100 text-xs mt-1">{format(new Date(), 'MMMM yyyy')}</p>
-                </CardContent>
-              </Card>
-              
-              <Card className="bg-gradient-to-br from-purple-500 to-violet-600 text-white border-0">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <p className="text-purple-100 text-xs font-medium">Net Worth</p>
-                    <PiggyBank className="w-4 h-4 text-purple-200" />
-                  </div>
-                  <p className="text-2xl font-bold mt-1">{formatCurrency(totalBalance + totalDebtsReceivable - totalDebtsPayable - totalLoansTaken + totalLoansGiven)}</p>
-                  <p className="text-purple-100 text-xs mt-1">After all debts</p>
-                </CardContent>
-              </Card>
-            </div>
+      {/* Main Content - No page scroll, only inner components scroll */}
+      <main className="flex-1 overflow-hidden">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col">
+          {/* Dashboard Tab */}
+          <TabsContent value="dashboard" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              {/* Period Selector */}
+              <div className="flex-shrink-0 flex gap-2 bg-slate-100 dark:bg-slate-800 p-1 rounded-xl">
+                {(['month', 'season', 'year'] as const).map(p => (
+                  <Button
+                    key={p}
+                    variant={period === p ? 'default' : 'ghost'}
+                    size="sm"
+                    className={`flex-1 rounded-lg text-sm ${period === p ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : ''}`}
+                    onClick={() => setPeriod(p)}
+                  >
+                    {p === 'month' ? 'Month' : p === 'season' ? 'Season' : 'Year'}
+                  </Button>
+                ))}
+              </div>
 
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              {/* Income vs Expenses Chart */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Income vs Expenses</CardTitle>
-                  <CardDescription>Last 6 months</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ChartContainer config={{}} className="h-48">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={last6Months}>
-                        <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200" />
-                        <XAxis dataKey="month" className="text-xs" />
-                        <YAxis className="text-xs" />
-                        <ChartTooltip content={<ChartTooltipContent />} />
-                        <Bar dataKey="income" fill="#10b981" radius={[4, 4, 0, 0]} name="Income" />
-                        <Bar dataKey="expense" fill="#f59e0b" radius={[4, 4, 0, 0]} name="Expense" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </ChartContainer>
-                </CardContent>
-              </Card>
-
-              {/* Expenses by Category */}
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-base">Expenses by Category</CardTitle>
-                  <CardDescription>This month</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  {expensesByCategory.length > 0 ? (
-                    <ChartContainer config={{}} className="h-48">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={expensesByCategory}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={40}
-                            outerRadius={70}
-                            dataKey="value"
-                            label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                            labelLine={false}
-                          >
-                            {expensesByCategory.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={entry.color} />
-                            ))}
-                          </Pie>
-                          <ChartTooltip content={<ChartTooltipContent />} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </ChartContainer>
-                  ) : (
-                    <div className="h-48 flex items-center justify-center text-slate-400">
-                      No expenses this month
+              {/* Balance Cards */}
+              <div className="flex-shrink-0 space-y-3">
+                {/* Main Balance Card */}
+                <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-0 shadow-lg">
+                  <CardContent className="p-5">
+                    <p className="text-emerald-100 text-sm font-medium">Total Balance</p>
+                    <p className="text-3xl font-bold mt-1">{formatCurrency(totalBalance)}</p>
+                    <div className="flex items-center gap-4 mt-3 text-sm">
+                      <span className="text-emerald-100">{accounts.length} accounts</span>
                     </div>
-                  )}
-                </CardContent>
-              </Card>
+                  </CardContent>
+                </Card>
+
+                {/* Income & Expenses Cards */}
+                <div className="grid grid-cols-2 gap-3">
+                  <Card className="bg-white dark:bg-slate-900 border shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-900 flex items-center justify-center">
+                          <TrendingUp className="w-4 h-4 text-blue-600" />
+                        </div>
+                        <span className="text-xs text-slate-500">Income</span>
+                      </div>
+                      <p className="text-xl font-bold text-blue-600">{formatCurrency(currentIncome)}</p>
+                      <div className="flex items-center gap-1 mt-2 text-xs">
+                        {previousIncome > 0 && (
+                          <>
+                            {incomeChange >= 0 ? (
+                              <ArrowUpRight className="w-3 h-3 text-emerald-500" />
+                            ) : (
+                              <ArrowDownRight className="w-3 h-3 text-red-500" />
+                            )}
+                            <span className={incomeChange >= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                              {Math.abs(incomeChange).toFixed(0)}%
+                            </span>
+                            <span className="text-slate-400">vs prev</span>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="bg-white dark:bg-slate-900 border shadow-sm">
+                    <CardContent className="p-4">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="w-8 h-8 rounded-full bg-amber-100 dark:bg-amber-900 flex items-center justify-center">
+                          <TrendingDown className="w-4 h-4 text-amber-600" />
+                        </div>
+                        <span className="text-xs text-slate-500">Expenses</span>
+                      </div>
+                      <p className="text-xl font-bold text-amber-600">{formatCurrency(currentExpenses)}</p>
+                      <div className="flex items-center gap-1 mt-2 text-xs">
+                        {previousExpenses > 0 && (
+                          <>
+                            {expenseChange <= 0 ? (
+                              <ArrowDownRight className="w-3 h-3 text-emerald-500" />
+                            ) : (
+                              <ArrowUpRight className="w-3 h-3 text-red-500" />
+                            )}
+                            <span className={expenseChange <= 0 ? 'text-emerald-500' : 'text-red-500'}>
+                              {Math.abs(expenseChange).toFixed(0)}%
+                            </span>
+                            <span className="text-slate-400">vs prev</span>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Previous Period Summary */}
+                <Card className="bg-slate-100 dark:bg-slate-800 border-0">
+                  <CardContent className="p-3">
+                    <p className="text-xs text-slate-500 mb-2">Previous Period</p>
+                    <div className="grid grid-cols-2 gap-4 text-sm">
+                      <div>
+                        <span className="text-slate-500">Income:</span>
+                        <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">{formatCurrency(previousIncome)}</span>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Expenses:</span>
+                        <span className="ml-2 font-medium text-slate-700 dark:text-slate-300">{formatCurrency(previousExpenses)}</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Recent Transactions - Scrollable */}
+              <div className="flex-1 min-h-0">
+                <Card className="h-full flex flex-col">
+                  <CardContent className="flex-1 flex flex-col p-3 min-h-0">
+                    <div className="flex items-center justify-between mb-2 flex-shrink-0">
+                      <span className="text-sm font-medium text-slate-700 dark:text-slate-300">Recent Transactions</span>
+                      <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setActiveTab('transactions')}>
+                        View All <ChevronRight className="w-3 h-3" />
+                      </Button>
+                    </div>
+                    <ScrollArea className="flex-1">
+                      {transactions.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
+                          <Receipt className="w-10 h-10 mb-2" />
+                          <p className="text-sm">No transactions yet</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2 pr-2">
+                          {transactions.slice(0, 10).map(t => (
+                            <div key={t.id} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 dark:bg-slate-800/50">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${
+                                  t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
+                                }`}>
+                                  {t.type === 'income' ? <ArrowUpRight className="w-4 h-4" /> : <ArrowDownRight className="w-4 h-4" />}
+                                </div>
+                                <div>
+                                  <p className="font-medium text-sm truncate max-w-[120px]">{t.description || 'Transaction'}</p>
+                                  <p className="text-xs text-slate-500">{format(new Date(t.date), 'MMM d')}</p>
+                                </div>
+                              </div>
+                              <p className={`font-semibold text-sm ${t.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </ScrollArea>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
+          </TabsContent>
 
-            {/* Quick Actions */}
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Quick Actions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-4 gap-2">
-                  <Dialog open={showTransactionDialog} onOpenChange={(open) => { setShowTransactionDialog(open); if (!open) { setEditingTransaction(null); resetTransactionForm(); } }}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                        <Plus className="w-5 h-5 text-emerald-500" />
-                        <span className="text-xs">Add Transaction</span>
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>{editingTransaction ? 'Edit Transaction' : 'Add Transaction'}</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant={transactionForm.type === 'income' ? 'default' : 'outline'}
-                            className={transactionForm.type === 'income' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
-                            onClick={() => setTransactionForm(prev => ({ ...prev, type: 'income' }))}
-                          >
-                            <TrendingUp className="w-4 h-4 mr-1" /> Income
-                          </Button>
-                          <Button
-                            variant={transactionForm.type === 'expense' ? 'default' : 'outline'}
-                            className={transactionForm.type === 'expense' ? 'bg-amber-500 hover:bg-amber-600' : ''}
-                            onClick={() => setTransactionForm(prev => ({ ...prev, type: 'expense' }))}
-                          >
-                            <TrendingDown className="w-4 h-4 mr-1" /> Expense
-                          </Button>
-                        </div>
-                        <div>
-                          <Label>Amount</Label>
-                          <Input
-                            type="number"
-                            placeholder="0.00"
-                            value={transactionForm.amount}
-                            onChange={e => setTransactionForm(prev => ({ ...prev, amount: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <Label>Description</Label>
-                          <Input
-                            placeholder="What was this for?"
-                            value={transactionForm.description}
-                            onChange={e => setTransactionForm(prev => ({ ...prev, description: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label>Date</Label>
-                            <Input
-                              type="date"
-                              value={transactionForm.date}
-                              onChange={e => setTransactionForm(prev => ({ ...prev, date: e.target.value }))}
-                            />
-                          </div>
-                          <div>
-                            <Label>Account</Label>
-                            <Select value={transactionForm.accountId} onValueChange={v => setTransactionForm(prev => ({ ...prev, accountId: v }))}>
-                              <SelectTrigger>
-                                <SelectValue placeholder="Select account" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {accounts.map(acc => (
-                                  <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div>
-                          <Label>Category</Label>
-                          <Select value={transactionForm.categoryId} onValueChange={v => setTransactionForm(prev => ({ ...prev, categoryId: v }))}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select category" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {categories.filter(c => c.type === transactionForm.type).map(cat => (
-                                <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Notes (optional)</Label>
-                          <Textarea
-                            placeholder="Additional notes..."
-                            value={transactionForm.notes}
-                            onChange={e => setTransactionForm(prev => ({ ...prev, notes: e.target.value }))}
-                            rows={2}
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => { setShowTransactionDialog(false); setEditingTransaction(null); resetTransactionForm(); }}>Cancel</Button>
-                        <Button onClick={editingTransaction ? handleUpdateTransaction : handleAddTransaction}>
-                          {editingTransaction ? 'Update' : 'Add'}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-
-                  <Dialog open={showAccountDialog} onOpenChange={(open) => { setShowAccountDialog(open); if (!open) resetAccountForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                        <Landmark className="w-5 h-5 text-blue-500" />
-                        <span className="text-xs">Add Account</span>
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Add Account</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div>
-                          <Label>Account Name</Label>
-                          <Input
-                            placeholder="e.g., Main Checking"
-                            value={accountForm.name}
-                            onChange={e => setAccountForm(prev => ({ ...prev, name: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <Label>Account Type</Label>
-                          <Select value={accountForm.type} onValueChange={v => setAccountForm(prev => ({ ...prev, type: v }))}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="bank">Bank Account</SelectItem>
-                              <SelectItem value="cash">Cash</SelectItem>
-                              <SelectItem value="credit_card">Credit Card</SelectItem>
-                              <SelectItem value="investment">Investment</SelectItem>
-                              <SelectItem value="savings">Savings</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label>Initial Balance</Label>
-                            <Input
-                              type="number"
-                              placeholder="0.00"
-                              value={accountForm.balance}
-                              onChange={e => setAccountForm(prev => ({ ...prev, balance: e.target.value }))}
-                            />
-                          </div>
-                          <div>
-                            <Label>Currency</Label>
-                            <Select value={accountForm.currency} onValueChange={v => setAccountForm(prev => ({ ...prev, currency: v }))}>
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="USD">USD</SelectItem>
-                                <SelectItem value="EUR">EUR</SelectItem>
-                                <SelectItem value="GBP">GBP</SelectItem>
-                                <SelectItem value="IRR">IRR</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowAccountDialog(false)}>Cancel</Button>
-                        <Button onClick={handleAddAccount}>Add Account</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-
-                  <Dialog open={showLoanDialog} onOpenChange={(open) => { setShowLoanDialog(open); if (!open) resetLoanForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                        <HandCoins className="w-5 h-5 text-purple-500" />
-                        <span className="text-xs">Add Loan</span>
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Add Loan</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant={loanForm.type === 'taken' ? 'default' : 'outline'}
-                            className={loanForm.type === 'taken' ? 'bg-red-500 hover:bg-red-600' : ''}
-                            onClick={() => setLoanForm(prev => ({ ...prev, type: 'taken' }))}
-                          >
-                            I Borrowed
-                          </Button>
-                          <Button
-                            variant={loanForm.type === 'given' ? 'default' : 'outline'}
-                            className={loanForm.type === 'given' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
-                            onClick={() => setLoanForm(prev => ({ ...prev, type: 'given' }))}
-                          >
-                            I Lent
-                          </Button>
-                        </div>
-                        <div>
-                          <Label>Amount</Label>
-                          <Input
-                            type="number"
-                            placeholder="0.00"
-                            value={loanForm.principalAmount}
-                            onChange={e => setLoanForm(prev => ({ ...prev, principalAmount: e.target.value }))}
-                          />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label>Interest Rate (%)</Label>
-                            <Input
-                              type="number"
-                              placeholder="0"
-                              value={loanForm.interestRate}
-                              onChange={e => setLoanForm(prev => ({ ...prev, interestRate: e.target.value }))}
-                            />
-                          </div>
-                          <div>
-                            <Label>Due Date</Label>
-                            <Input
-                              type="date"
-                              value={loanForm.dueDate}
-                              onChange={e => setLoanForm(prev => ({ ...prev, dueDate: e.target.value }))}
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <Label>Contact (optional)</Label>
-                          <Select value={loanForm.contactId} onValueChange={v => setLoanForm(prev => ({ ...prev, contactId: v }))}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select contact" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {contacts.map(c => (
-                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Description</Label>
-                          <Textarea
-                            placeholder="Loan details..."
-                            value={loanForm.description}
-                            onChange={e => setLoanForm(prev => ({ ...prev, description: e.target.value }))}
-                            rows={2}
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowLoanDialog(false)}>Cancel</Button>
-                        <Button onClick={handleAddLoan}>Add Loan</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-
-                  <Dialog open={showDebtDialog} onOpenChange={(open) => { setShowDebtDialog(open); if (!open) resetDebtForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button variant="outline" className="h-auto py-3 flex-col gap-1">
-                        <CreditCard className="w-5 h-5 text-red-500" />
-                        <span className="text-xs">Add Debt</span>
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>Add Debt/Receivable</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant={debtForm.type === 'payable' ? 'default' : 'outline'}
-                            className={debtForm.type === 'payable' ? 'bg-red-500 hover:bg-red-600' : ''}
-                            onClick={() => setDebtForm(prev => ({ ...prev, type: 'payable' }))}
-                          >
-                            I Owe
-                          </Button>
-                          <Button
-                            variant={debtForm.type === 'receivable' ? 'default' : 'outline'}
-                            className={debtForm.type === 'receivable' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
-                            onClick={() => setDebtForm(prev => ({ ...prev, type: 'receivable' }))}
-                          >
-                            Owed to Me
-                          </Button>
-                        </div>
-                        <div>
-                          <Label>Amount</Label>
-                          <Input
-                            type="number"
-                            placeholder="0.00"
-                            value={debtForm.amount}
-                            onChange={e => setDebtForm(prev => ({ ...prev, amount: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <Label>Due Date</Label>
-                          <Input
-                            type="date"
-                            value={debtForm.dueDate}
-                            onChange={e => setDebtForm(prev => ({ ...prev, dueDate: e.target.value }))}
-                          />
-                        </div>
-                        <div>
-                          <Label>Contact (optional)</Label>
-                          <Select value={debtForm.contactId} onValueChange={v => setDebtForm(prev => ({ ...prev, contactId: v }))}>
-                            <SelectTrigger>
-                              <SelectValue placeholder="Select contact" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {contacts.map(c => (
-                                <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Description</Label>
-                          <Textarea
-                            placeholder="Details..."
-                            value={debtForm.description}
-                            onChange={e => setDebtForm(prev => ({ ...prev, description: e.target.value }))}
-                            rows={2}
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => setShowDebtDialog(false)}>Cancel</Button>
-                        <Button onClick={handleAddDebt}>Add</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Recent Transactions */}
-            <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">Recent Transactions</CardTitle>
-                  <CardDescription>Last 10 transactions</CardDescription>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setActiveTab('transactions')}>
-                  View All <ChevronRight className="w-4 h-4" />
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-64">
+          {/* Transactions Tab */}
+          <TabsContent value="transactions" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              <div className="flex items-center justify-between flex-shrink-0">
+                <h2 className="text-lg font-semibold">Transactions</h2>
+                <Badge variant="secondary">{transactions.length}</Badge>
+              </div>
+              
+              <div className="flex-1 min-h-0">
+                <ScrollArea className="h-full">
                   {transactions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-48 text-slate-400">
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
                       <Receipt className="w-12 h-12 mb-2" />
                       <p>No transactions yet</p>
+                      <p className="text-sm">Tap the + button to add one</p>
                     </div>
                   ) : (
-                    <div className="space-y-2">
-                      {transactions.slice(0, 10).map(t => (
-                        <div key={t.id} className="flex items-center justify-between p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <div className="space-y-2 pr-2">
+                      {transactions.map(t => (
+                        <div key={t.id} className="flex items-center justify-between p-3 rounded-xl border bg-white dark:bg-slate-900">
                           <div className="flex items-center gap-3">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
                               t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'
@@ -1165,165 +958,11 @@ export default function PersonalFinanceApp() {
                               {t.type === 'income' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownRight className="w-5 h-5" />}
                             </div>
                             <div>
-                              <p className="font-medium text-sm">{t.description || 'Transaction'}</p>
-                              <p className="text-xs text-slate-500">{format(new Date(t.date), 'MMM d, yyyy')}</p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <p className={`font-semibold ${t.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                              {t.type === 'income' ? '+' : '-'}{formatCurrency(t.amount)}
-                            </p>
-                            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEditTransaction(t)}>
-                              <Edit className="w-4 h-4" />
-                            </Button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </ScrollArea>
-              </CardContent>
-            </Card>
-
-            {/* Accounts Overview */}
-            <Card>
-              <CardHeader className="pb-2 flex flex-row items-center justify-between">
-                <div>
-                  <CardTitle className="text-base">Accounts</CardTitle>
-                  <CardDescription>Your financial accounts</CardDescription>
-                </div>
-                <Button variant="ghost" size="sm" onClick={() => setActiveTab('accounts')}>
-                  Manage <ChevronRight className="w-4 h-4" />
-                </Button>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {accounts.slice(0, 6).map(acc => {
-                    const Icon = getAccountIcon(acc.type)
-                    return (
-                      <div key={acc.id} className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/50">
-                        <div className="flex items-center gap-2 mb-2">
-                          <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: acc.color || '#3b82f6' }}>
-                            <Icon className="w-4 h-4 text-white" />
-                          </div>
-                          <div>
-                            <p className="font-medium text-sm">{acc.name}</p>
-                            <p className="text-xs text-slate-500">{acc.type.replace('_', ' ')}</p>
-                          </div>
-                        </div>
-                        <p className={`text-lg font-bold ${acc.balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {formatCurrency(acc.balance, acc.currency)}
-                        </p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* Transactions Tab */}
-          <TabsContent value="transactions" className="space-y-4 mt-0">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>All Transactions</CardTitle>
-                    <CardDescription>{transactions.length} transactions</CardDescription>
-                  </div>
-                  <Dialog open={showTransactionDialog} onOpenChange={(open) => { setShowTransactionDialog(open); if (!open) { setEditingTransaction(null); resetTransactionForm(); } }}>
-                    <DialogTrigger asChild>
-                      <Button size="sm">
-                        <Plus className="w-4 h-4 mr-1" /> Add
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader>
-                        <DialogTitle>{editingTransaction ? 'Edit Transaction' : 'Add Transaction'}</DialogTitle>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button
-                            variant={transactionForm.type === 'income' ? 'default' : 'outline'}
-                            className={transactionForm.type === 'income' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
-                            onClick={() => setTransactionForm(prev => ({ ...prev, type: 'income' }))}
-                          >
-                            <TrendingUp className="w-4 h-4 mr-1" /> Income
-                          </Button>
-                          <Button
-                            variant={transactionForm.type === 'expense' ? 'default' : 'outline'}
-                            className={transactionForm.type === 'expense' ? 'bg-amber-500 hover:bg-amber-600' : ''}
-                            onClick={() => setTransactionForm(prev => ({ ...prev, type: 'expense' }))}
-                          >
-                            <TrendingDown className="w-4 h-4 mr-1" /> Expense
-                          </Button>
-                        </div>
-                        <div>
-                          <Label>Amount</Label>
-                          <Input type="number" placeholder="0.00" value={transactionForm.amount} onChange={e => setTransactionForm(prev => ({ ...prev, amount: e.target.value }))} />
-                        </div>
-                        <div>
-                          <Label>Description</Label>
-                          <Input placeholder="What was this for?" value={transactionForm.description} onChange={e => setTransactionForm(prev => ({ ...prev, description: e.target.value }))} />
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label>Date</Label>
-                            <Input type="date" value={transactionForm.date} onChange={e => setTransactionForm(prev => ({ ...prev, date: e.target.value }))} />
-                          </div>
-                          <div>
-                            <Label>Account</Label>
-                            <Select value={transactionForm.accountId} onValueChange={v => setTransactionForm(prev => ({ ...prev, accountId: v }))}>
-                              <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
-                              <SelectContent>
-                                {accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                        <div>
-                          <Label>Category</Label>
-                          <Select value={transactionForm.categoryId} onValueChange={v => setTransactionForm(prev => ({ ...prev, categoryId: v }))}>
-                            <SelectTrigger><SelectValue placeholder="Select category" /></SelectTrigger>
-                            <SelectContent>
-                              {categories.filter(c => c.type === transactionForm.type).map(cat => (<SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div>
-                          <Label>Notes (optional)</Label>
-                          <Textarea placeholder="Additional notes..." value={transactionForm.notes} onChange={e => setTransactionForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button variant="outline" onClick={() => { setShowTransactionDialog(false); setEditingTransaction(null); resetTransactionForm(); }}>Cancel</Button>
-                        <Button onClick={editingTransaction ? handleUpdateTransaction : handleAddTransaction}>{editingTransaction ? 'Update' : 'Add'}</Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <ScrollArea className="h-[60vh]">
-                  {transactions.length === 0 ? (
-                    <div className="flex flex-col items-center justify-center h-48 text-slate-400">
-                      <Receipt className="w-12 h-12 mb-2" />
-                      <p>No transactions yet</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {transactions.map(t => (
-                        <div key={t.id} className="flex items-center justify-between p-3 rounded-lg border">
-                          <div className="flex items-center gap-3">
-                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${t.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                              {t.type === 'income' ? <ArrowUpRight className="w-5 h-5" /> : <ArrowDownRight className="w-5 h-5" />}
-                            </div>
-                            <div>
                               <p className="font-medium">{t.description || 'Transaction'}</p>
                               <div className="flex items-center gap-2 text-xs text-slate-500">
                                 <span>{format(new Date(t.date), 'MMM d, yyyy')}</span>
                                 <span>•</span>
-                                <span>{accounts.find(a => a.id === t.accountId)?.name || 'Unknown'}</span>
+                                <span>{categories.find(c => c.id === t.categoryId)?.name || 'Uncategorized'}</span>
                               </div>
                             </div>
                           </div>
@@ -1357,531 +996,772 @@ export default function PersonalFinanceApp() {
                     </div>
                   )}
                 </ScrollArea>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Loans & Debts Tab */}
-          <TabsContent value="loans" className="space-y-4 mt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Loans */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle>Loans</CardTitle>
-                      <CardDescription>Money lent or borrowed</CardDescription>
-                    </div>
-                    <Dialog open={showLoanDialog} onOpenChange={(open) => { setShowLoanDialog(open); if (!open) resetLoanForm(); }}>
-                      <DialogTrigger asChild>
-                        <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add</Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-md">
-                        <DialogHeader><DialogTitle>Add Loan</DialogTitle></DialogHeader>
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button variant={loanForm.type === 'taken' ? 'default' : 'outline'} className={loanForm.type === 'taken' ? 'bg-red-500 hover:bg-red-600' : ''} onClick={() => setLoanForm(prev => ({ ...prev, type: 'taken' }))}>I Borrowed</Button>
-                            <Button variant={loanForm.type === 'given' ? 'default' : 'outline'} className={loanForm.type === 'given' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setLoanForm(prev => ({ ...prev, type: 'given' }))}>I Lent</Button>
-                          </div>
-                          <div><Label>Amount</Label><Input type="number" placeholder="0.00" value={loanForm.principalAmount} onChange={e => setLoanForm(prev => ({ ...prev, principalAmount: e.target.value }))} /></div>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div><Label>Interest Rate (%)</Label><Input type="number" placeholder="0" value={loanForm.interestRate} onChange={e => setLoanForm(prev => ({ ...prev, interestRate: e.target.value }))} /></div>
-                            <div><Label>Due Date</Label><Input type="date" value={loanForm.dueDate} onChange={e => setLoanForm(prev => ({ ...prev, dueDate: e.target.value }))} /></div>
-                          </div>
-                          <div><Label>Contact</Label><Select value={loanForm.contactId} onValueChange={v => setLoanForm(prev => ({ ...prev, contactId: v }))}><SelectTrigger><SelectValue placeholder="Select contact" /></SelectTrigger><SelectContent>{contacts.map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
-                          <div><Label>Description</Label><Textarea placeholder="Loan details..." value={loanForm.description} onChange={e => setLoanForm(prev => ({ ...prev, description: e.target.value }))} rows={2} /></div>
-                        </div>
-                        <DialogFooter><Button variant="outline" onClick={() => setShowLoanDialog(false)}>Cancel</Button><Button onClick={handleAddLoan}>Add</Button></DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {loans.length === 0 ? (
-                      <div className="text-center py-8 text-slate-400">
-                        <HandCoins className="w-12 h-12 mx-auto mb-2" />
-                        <p>No loans yet</p>
-                      </div>
-                    ) : (
-                      loans.map(loan => {
-                        const paid = loan.payments.reduce((s, p) => s + p.principal, 0)
-                        const remaining = loan.principalAmount - paid
-                        const progress = (paid / loan.principalAmount) * 100
-                        return (
-                          <div key={loan.id} className="p-3 rounded-lg border">
-                            <div className="flex items-center justify-between mb-2">
-                              <div className="flex items-center gap-2">
-                                <Badge variant={loan.type === 'given' ? 'default' : 'destructive'} className={loan.type === 'given' ? 'bg-emerald-500' : ''}>
-                                  {loan.type === 'given' ? 'Lent' : 'Borrowed'}
-                                </Badge>
-                                <Badge variant="outline">{loan.status}</Badge>
-                              </div>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"><Trash2 className="w-4 h-4" /></Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader><AlertDialogTitle>Delete Loan</AlertDialogTitle><AlertDialogDescription>Are you sure?</AlertDialogDescription></AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction className="bg-red-500 hover:bg-red-600" onClick={() => handleDeleteLoan(loan.id)}>Delete</AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </div>
-                            <p className="font-semibold text-lg">{formatCurrency(remaining)} remaining</p>
-                            <p className="text-sm text-slate-500">of {formatCurrency(loan.principalAmount)}</p>
-                            <Progress value={progress} className="h-2 mt-2" />
-                            {loan.dueDate && (
-                              <p className="text-xs text-slate-500 mt-2">Due: {format(new Date(loan.dueDate), 'MMM d, yyyy')}</p>
-                            )}
-                          </div>
-                        )
-                      })
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+          <TabsContent value="loans" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              <div className="flex items-center justify-between flex-shrink-0">
+                <h2 className="text-lg font-semibold">Loans & Debts</h2>
+              </div>
+              
+              {/* Summary Cards */}
+              <div className="flex-shrink-0 grid grid-cols-2 gap-3">
+                <Card className="bg-gradient-to-br from-red-500 to-red-600 text-white">
+                  <CardContent className="p-3">
+                    <p className="text-red-100 text-xs">To Pay</p>
+                    <p className="text-lg font-bold">{formatCurrency(totalLoansTaken + totalDebtsPayable)}</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                  <CardContent className="p-3">
+                    <p className="text-emerald-100 text-xs">To Receive</p>
+                    <p className="text-lg font-bold">{formatCurrency(totalLoansGiven + totalDebtsReceivable)}</p>
+                  </CardContent>
+                </Card>
+              </div>
 
-              {/* Debts */}
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
+              <div className="flex-1 min-h-0">
+                <ScrollArea className="h-full">
+                  <div className="space-y-4 pr-2">
+                    {/* Loans Section */}
                     <div>
-                      <CardTitle>Debts & Receivables</CardTitle>
-                      <CardDescription>Money owed or owing</CardDescription>
-                    </div>
-                    <Dialog open={showDebtDialog} onOpenChange={(open) => { setShowDebtDialog(open); if (!open) resetDebtForm(); }}>
-                      <DialogTrigger asChild>
-                        <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add</Button>
-                      </DialogTrigger>
-                      <DialogContent className="max-w-md">
-                        <DialogHeader><DialogTitle>Add Debt/Receivable</DialogTitle></DialogHeader>
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-2">
-                            <Button variant={debtForm.type === 'payable' ? 'default' : 'outline'} className={debtForm.type === 'payable' ? 'bg-red-500 hover:bg-red-600' : ''} onClick={() => setDebtForm(prev => ({ ...prev, type: 'payable' }))}>I Owe</Button>
-                            <Button variant={debtForm.type === 'receivable' ? 'default' : 'outline'} className={debtForm.type === 'receivable' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setDebtForm(prev => ({ ...prev, type: 'receivable' }))}>Owed to Me</Button>
-                          </div>
-                          <div><Label>Amount</Label><Input type="number" placeholder="0.00" value={debtForm.amount} onChange={e => setDebtForm(prev => ({ ...prev, amount: e.target.value }))} /></div>
-                          <div><Label>Due Date</Label><Input type="date" value={debtForm.dueDate} onChange={e => setDebtForm(prev => ({ ...prev, dueDate: e.target.value }))} /></div>
-                          <div><Label>Contact</Label><Select value={debtForm.contactId} onValueChange={v => setDebtForm(prev => ({ ...prev, contactId: v }))}><SelectTrigger><SelectValue placeholder="Select contact" /></SelectTrigger><SelectContent>{contacts.map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}</SelectContent></Select></div>
-                          <div><Label>Description</Label><Textarea placeholder="Details..." value={debtForm.description} onChange={e => setDebtForm(prev => ({ ...prev, description: e.target.value }))} rows={2} /></div>
-                        </div>
-                        <DialogFooter><Button variant="outline" onClick={() => setShowDebtDialog(false)}>Cancel</Button><Button onClick={handleAddDebt}>Add</Button></DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {debts.length === 0 ? (
-                      <div className="text-center py-8 text-slate-400">
-                        <CreditCard className="w-12 h-12 mx-auto mb-2" />
-                        <p>No debts yet</p>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-slate-500">Loans</span>
+                        <Button variant="outline" size="sm" onClick={() => setShowLoanDialog(true)}>
+                          <Plus className="w-4 h-4 mr-1" /> Add
+                        </Button>
                       </div>
-                    ) : (
-                      debts.map(debt => (
-                        <div key={debt.id} className="p-3 rounded-lg border">
-                          <div className="flex items-center justify-between mb-2">
-                            <Badge variant={debt.type === 'receivable' ? 'default' : 'destructive'} className={debt.type === 'receivable' ? 'bg-emerald-500' : ''}>
-                              {debt.type === 'receivable' ? 'Receivable' : 'Payable'}
-                            </Badge>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"><Trash2 className="w-4 h-4" /></Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader><AlertDialogTitle>Delete Debt</AlertDialogTitle><AlertDialogDescription>Are you sure?</AlertDialogDescription></AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction className="bg-red-500 hover:bg-red-600" onClick={() => handleDeleteDebt(debt.id)}>Delete</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                          <p className="font-semibold text-lg">{formatCurrency(debt.remainingAmount)}</p>
-                          <Progress value={((debt.amount - debt.remainingAmount) / debt.amount) * 100} className="h-2 mt-2" />
-                          {debt.dueDate && (
-                            <p className="text-xs text-slate-500 mt-2">Due: {format(new Date(debt.dueDate), 'MMM d, yyyy')}</p>
-                          )}
+                      {loans.length === 0 ? (
+                        <Card className="border-dashed">
+                          <CardContent className="p-4 text-center text-slate-400">
+                            <HandCoins className="w-8 h-8 mx-auto mb-2" />
+                            <p className="text-sm">No loans yet</p>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <div className="space-y-2">
+                          {loans.map(loan => {
+                            const paid = loan.payments.reduce((s, p) => s + p.principal, 0)
+                            const remaining = loan.principalAmount - paid
+                            const progress = (paid / loan.principalAmount) * 100
+                            return (
+                              <Card key={loan.id}>
+                                <CardContent className="p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <Badge variant={loan.type === 'given' ? 'default' : 'destructive'} className={loan.type === 'given' ? 'bg-emerald-500' : ''}>
+                                      {loan.type === 'given' ? 'Lent' : 'Borrowed'}
+                                    </Badge>
+                                    <AlertDialog>
+                                      <AlertDialogTrigger asChild>
+                                        <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"><Trash2 className="w-3 h-3" /></Button>
+                                      </AlertDialogTrigger>
+                                      <AlertDialogContent>
+                                        <AlertDialogHeader><AlertDialogTitle>Delete Loan</AlertDialogTitle></AlertDialogHeader>
+                                        <AlertDialogFooter>
+                                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                          <AlertDialogAction className="bg-red-500" onClick={() => handleDeleteLoan(loan.id)}>Delete</AlertDialogAction>
+                                        </AlertDialogFooter>
+                                      </AlertDialogContent>
+                                    </AlertDialog>
+                                  </div>
+                                  <p className="font-semibold">{formatCurrency(remaining)} remaining</p>
+                                  <Progress value={progress} className="h-1.5 mt-2" />
+                                </CardContent>
+                              </Card>
+                            )
+                          })}
                         </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+                      )}
+                    </div>
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card className="bg-gradient-to-br from-red-500 to-red-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-red-100 text-xs">Loans Borrowed</p>
-                  <p className="text-xl font-bold">{formatCurrency(totalLoansTaken)}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-emerald-100 text-xs">Loans Given</p>
-                  <p className="text-xl font-bold">{formatCurrency(totalLoansGiven)}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-orange-100 text-xs">Debts to Pay</p>
-                  <p className="text-xl font-bold">{formatCurrency(totalDebtsPayable)}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-teal-500 to-teal-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-teal-100 text-xs">Receivables</p>
-                  <p className="text-xl font-bold">{formatCurrency(totalDebtsReceivable)}</p>
-                </CardContent>
-              </Card>
+                    {/* Debts Section */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-slate-500">Debts</span>
+                        <Button variant="outline" size="sm" onClick={() => setShowDebtDialog(true)}>
+                          <Plus className="w-4 h-4 mr-1" /> Add
+                        </Button>
+                      </div>
+                      {debts.length === 0 ? (
+                        <Card className="border-dashed">
+                          <CardContent className="p-4 text-center text-slate-400">
+                            <CreditCard className="w-8 h-8 mx-auto mb-2" />
+                            <p className="text-sm">No debts yet</p>
+                          </CardContent>
+                        </Card>
+                      ) : (
+                        <div className="space-y-2">
+                          {debts.map(debt => (
+                            <Card key={debt.id}>
+                              <CardContent className="p-3">
+                                <div className="flex items-center justify-between mb-2">
+                                  <Badge variant={debt.type === 'receivable' ? 'default' : 'destructive'} className={debt.type === 'receivable' ? 'bg-emerald-500' : ''}>
+                                    {debt.type === 'receivable' ? 'Receivable' : 'Payable'}
+                                  </Badge>
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"><Trash2 className="w-3 h-3" /></Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader><AlertDialogTitle>Delete Debt</AlertDialogTitle></AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction className="bg-red-500" onClick={() => handleDeleteDebt(debt.id)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                                <p className="font-semibold">{formatCurrency(debt.remainingAmount)}</p>
+                                <Progress value={((debt.amount - debt.remainingAmount) / debt.amount) * 100} className="h-1.5 mt-2" />
+                              </CardContent>
+                            </Card>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </ScrollArea>
+              </div>
             </div>
           </TabsContent>
 
           {/* Scheduled Payments Tab */}
-          <TabsContent value="scheduled" className="space-y-4 mt-0">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Scheduled Payments</CardTitle>
-                    <CardDescription>Recurring income and expenses</CardDescription>
-                  </div>
-                  <Dialog open={showScheduledDialog} onOpenChange={(open) => { setShowScheduledDialog(open); if (!open) resetScheduledForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add</Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader><DialogTitle>Add Scheduled Payment</DialogTitle></DialogHeader>
-                      <div className="space-y-4">
-                        <div><Label>Name</Label><Input placeholder="e.g., Rent, Salary" value={scheduledForm.name} onChange={e => setScheduledForm(prev => ({ ...prev, name: e.target.value }))} /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <Button variant={scheduledForm.type === 'income' ? 'default' : 'outline'} className={scheduledForm.type === 'income' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setScheduledForm(prev => ({ ...prev, type: 'income' }))}>Income</Button>
-                          <Button variant={scheduledForm.type === 'expense' ? 'default' : 'outline'} className={scheduledForm.type === 'expense' ? 'bg-amber-500 hover:bg-amber-600' : ''} onClick={() => setScheduledForm(prev => ({ ...prev, type: 'expense' }))}>Expense</Button>
-                        </div>
-                        <div><Label>Amount</Label><Input type="number" placeholder="0.00" value={scheduledForm.amount} onChange={e => setScheduledForm(prev => ({ ...prev, amount: e.target.value }))} /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <Label>Frequency</Label>
-                            <Select value={scheduledForm.frequency} onValueChange={v => setScheduledForm(prev => ({ ...prev, frequency: v }))}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="daily">Daily</SelectItem>
-                                <SelectItem value="weekly">Weekly</SelectItem>
-                                <SelectItem value="monthly">Monthly</SelectItem>
-                                <SelectItem value="yearly">Yearly</SelectItem>
-                                <SelectItem value="custom">Custom</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          {scheduledForm.frequency === 'custom' && (
-                            <div><Label>Days</Label><Input type="number" placeholder="30" value={scheduledForm.customDays} onChange={e => setScheduledForm(prev => ({ ...prev, customDays: e.target.value }))} /></div>
-                          )}
-                        </div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label>Start Date</Label><Input type="date" value={scheduledForm.startDate} onChange={e => setScheduledForm(prev => ({ ...prev, startDate: e.target.value }))} /></div>
-                          <div><Label>Next Due</Label><Input type="date" value={scheduledForm.nextDueDate} onChange={e => setScheduledForm(prev => ({ ...prev, nextDueDate: e.target.value }))} /></div>
-                        </div>
-                        <div><Label>Account</Label><Select value={scheduledForm.accountId} onValueChange={v => setScheduledForm(prev => ({ ...prev, accountId: v }))}><SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger><SelectContent>{accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>))}</SelectContent></Select></div>
-                        <div><Label>Description</Label><Textarea placeholder="Details..." value={scheduledForm.description} onChange={e => setScheduledForm(prev => ({ ...prev, description: e.target.value }))} rows={2} /></div>
-                      </div>
-                      <DialogFooter><Button variant="outline" onClick={() => setShowScheduledDialog(false)}>Cancel</Button><Button onClick={handleAddScheduled}>Add</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
+          <TabsContent value="scheduled" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              <div className="flex items-center justify-between flex-shrink-0">
+                <h2 className="text-lg font-semibold">Scheduled Payments</h2>
+                <Button variant="outline" size="sm" onClick={() => setShowScheduledDialog(true)}>
+                  <Plus className="w-4 h-4 mr-1" /> Add
+                </Button>
+              </div>
+              
+              <div className="flex-1 min-h-0">
+                <ScrollArea className="h-full">
                   {scheduledPayments.length === 0 ? (
-                    <div className="text-center py-8 text-slate-400">
-                      <CalendarClock className="w-12 h-12 mx-auto mb-2" />
-                      <p>No scheduled payments yet</p>
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
+                      <CalendarClock className="w-12 h-12 mb-2" />
+                      <p>No scheduled payments</p>
                     </div>
                   ) : (
-                    scheduledPayments.map(sp => (
-                      <div key={sp.id} className="flex items-center justify-between p-3 rounded-lg border">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${sp.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
-                            <CalendarClock className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <p className="font-medium">{sp.name}</p>
-                            <div className="flex items-center gap-2 text-xs text-slate-500">
-                              <Badge variant="outline" className="text-xs">{sp.frequency}</Badge>
-                              <span>Next: {format(new Date(sp.nextDueDate), 'MMM d')}</span>
+                    <div className="space-y-2 pr-2">
+                      {scheduledPayments.map(sp => (
+                        <Card key={sp.id}>
+                          <CardContent className="p-3">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                <div className={`w-9 h-9 rounded-full flex items-center justify-center ${sp.type === 'income' ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'}`}>
+                                  <CalendarClock className="w-4 h-4" />
+                                </div>
+                                <div>
+                                  <p className="font-medium">{sp.name}</p>
+                                  <div className="flex items-center gap-2 text-xs text-slate-500">
+                                    <Badge variant="outline" className="text-xs">{sp.frequency}</Badge>
+                                    <span>Next: {format(new Date(sp.nextDueDate), 'MMM d')}</span>
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <p className={`font-semibold ${sp.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                  {sp.type === 'income' ? '+' : '-'}{formatCurrency(sp.amount)}
+                                </p>
+                                <AlertDialog>
+                                  <AlertDialogTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-7 w-7 text-red-500"><Trash2 className="w-3 h-3" /></Button>
+                                  </AlertDialogTrigger>
+                                  <AlertDialogContent>
+                                    <AlertDialogHeader><AlertDialogTitle>Delete</AlertDialogTitle></AlertDialogHeader>
+                                    <AlertDialogFooter>
+                                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                      <AlertDialogAction className="bg-red-500" onClick={() => handleDeleteScheduled(sp.id)}>Delete</AlertDialogAction>
+                                    </AlertDialogFooter>
+                                  </AlertDialogContent>
+                                </AlertDialog>
+                              </div>
                             </div>
-                          </div>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <p className={`font-semibold ${sp.type === 'income' ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {sp.type === 'income' ? '+' : '-'}{formatCurrency(sp.amount)}
-                          </p>
-                          <AlertDialog>
-                            <AlertDialogTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"><Trash2 className="w-4 h-4" /></Button>
-                            </AlertDialogTrigger>
-                            <AlertDialogContent>
-                              <AlertDialogHeader><AlertDialogTitle>Delete Scheduled Payment</AlertDialogTitle><AlertDialogDescription>Are you sure?</AlertDialogDescription></AlertDialogHeader>
-                              <AlertDialogFooter>
-                                <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                <AlertDialogAction className="bg-red-500 hover:bg-red-600" onClick={() => handleDeleteScheduled(sp.id)}>Delete</AlertDialogAction>
-                              </AlertDialogFooter>
-                            </AlertDialogContent>
-                          </AlertDialog>
-                        </div>
-                      </div>
-                    ))
+                          </CardContent>
+                        </Card>
+                      ))}
+                    </div>
                   )}
-                </div>
-              </CardContent>
-            </Card>
+                </ScrollArea>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Accounts Tab */}
-          <TabsContent value="accounts" className="space-y-4 mt-0">
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Your Accounts</CardTitle>
-                    <CardDescription>Manage your financial accounts</CardDescription>
-                  </div>
-                  <Dialog open={showAccountDialog} onOpenChange={(open) => { setShowAccountDialog(open); if (!open) resetAccountForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add Account</Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader><DialogTitle>Add Account</DialogTitle></DialogHeader>
-                      <div className="space-y-4">
-                        <div><Label>Account Name</Label><Input placeholder="e.g., Main Checking" value={accountForm.name} onChange={e => setAccountForm(prev => ({ ...prev, name: e.target.value }))} /></div>
-                        <div><Label>Account Type</Label><Select value={accountForm.type} onValueChange={v => setAccountForm(prev => ({ ...prev, type: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-                          <SelectItem value="bank">Bank Account</SelectItem>
-                          <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="credit_card">Credit Card</SelectItem>
-                          <SelectItem value="investment">Investment</SelectItem>
-                          <SelectItem value="savings">Savings</SelectItem>
-                        </SelectContent></Select></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label>Initial Balance</Label><Input type="number" placeholder="0.00" value={accountForm.balance} onChange={e => setAccountForm(prev => ({ ...prev, balance: e.target.value }))} /></div>
-                          <div><Label>Currency</Label><Select value={accountForm.currency} onValueChange={v => setAccountForm(prev => ({ ...prev, currency: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-                            <SelectItem value="USD">USD</SelectItem>
-                            <SelectItem value="EUR">EUR</SelectItem>
-                            <SelectItem value="GBP">GBP</SelectItem>
-                            <SelectItem value="IRR">IRR</SelectItem>
-                          </SelectContent></Select></div>
-                        </div>
-                      </div>
-                      <DialogFooter><Button variant="outline" onClick={() => setShowAccountDialog(false)}>Cancel</Button><Button onClick={handleAddAccount}>Add</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <TabsContent value="accounts" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              <div className="flex items-center justify-between flex-shrink-0">
+                <h2 className="text-lg font-semibold">Accounts</h2>
+                <Button variant="outline" size="sm" onClick={() => setShowAccountDialog(true)}>
+                  <Plus className="w-4 h-4 mr-1" /> Add
+                </Button>
+              </div>
+              
+              <div className="flex-1 min-h-0">
+                <ScrollArea className="h-full">
                   {accounts.length === 0 ? (
-                    <div className="col-span-full text-center py-8 text-slate-400">
-                      <Landmark className="w-12 h-12 mx-auto mb-2" />
+                    <div className="flex flex-col items-center justify-center h-full text-slate-400 py-8">
+                      <Landmark className="w-12 h-12 mb-2" />
                       <p>No accounts yet</p>
+                      <p className="text-sm">Add one to get started</p>
                     </div>
                   ) : (
-                    accounts.map(acc => {
-                      const Icon = getAccountIcon(acc.type)
-                      return (
-                        <div key={acc.id} className="p-4 rounded-xl border flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="w-12 h-12 rounded-xl flex items-center justify-center" style={{ backgroundColor: acc.color || '#3b82f6' }}>
-                              <Icon className="w-6 h-6 text-white" />
-                            </div>
-                            <div>
-                              <p className="font-semibold">{acc.name}</p>
-                              <p className="text-sm text-slate-500 capitalize">{acc.type.replace('_', ' ')}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className={`text-lg font-bold ${acc.balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                              {formatCurrency(acc.balance, acc.currency)}
-                            </p>
-                            <AlertDialog>
-                              <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="sm" className="text-red-500"><Trash2 className="w-4 h-4" /></Button>
-                              </AlertDialogTrigger>
-                              <AlertDialogContent>
-                                <AlertDialogHeader><AlertDialogTitle>Delete Account</AlertDialogTitle><AlertDialogDescription>Are you sure? This will also delete all associated transactions.</AlertDialogDescription></AlertDialogHeader>
-                                <AlertDialogFooter>
-                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                  <AlertDialogAction className="bg-red-500 hover:bg-red-600" onClick={() => handleDeleteAccount(acc.id)}>Delete</AlertDialogAction>
-                                </AlertDialogFooter>
-                              </AlertDialogContent>
-                            </AlertDialog>
-                          </div>
-                        </div>
-                      )
-                    })
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Contacts Management */}
-            <Card>
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle>Contacts</CardTitle>
-                    <CardDescription>People and entities for loans/debts</CardDescription>
-                  </div>
-                  <Dialog open={showContactDialog} onOpenChange={(open) => { setShowContactDialog(open); if (!open) resetContactForm(); }}>
-                    <DialogTrigger asChild>
-                      <Button size="sm"><Plus className="w-4 h-4 mr-1" /> Add Contact</Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-md">
-                      <DialogHeader><DialogTitle>Add Contact</DialogTitle></DialogHeader>
-                      <div className="space-y-4">
-                        <div><Label>Name</Label><Input placeholder="Contact name" value={contactForm.name} onChange={e => setContactForm(prev => ({ ...prev, name: e.target.value }))} /></div>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div><Label>Email</Label><Input type="email" placeholder="email@example.com" value={contactForm.email} onChange={e => setContactForm(prev => ({ ...prev, email: e.target.value }))} /></div>
-                          <div><Label>Phone</Label><Input type="tel" placeholder="+1234567890" value={contactForm.phone} onChange={e => setContactForm(prev => ({ ...prev, phone: e.target.value }))} /></div>
-                        </div>
-                        <div><Label>Type</Label><Select value={contactForm.type} onValueChange={v => setContactForm(prev => ({ ...prev, type: v }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>
-                          <SelectItem value="person">Person</SelectItem>
-                          <SelectItem value="company">Company</SelectItem>
-                        </SelectContent></Select></div>
-                        <div><Label>Notes</Label><Textarea placeholder="Additional notes..." value={contactForm.notes} onChange={e => setContactForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} /></div>
-                      </div>
-                      <DialogFooter><Button variant="outline" onClick={() => setShowContactDialog(false)}>Cancel</Button><Button onClick={handleAddContact}>Add</Button></DialogFooter>
-                    </DialogContent>
-                  </Dialog>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {contacts.length === 0 ? (
-                    <div className="col-span-full text-center py-8 text-slate-400">
-                      <Users className="w-12 h-12 mx-auto mb-2" />
-                      <p>No contacts yet</p>
+                    <div className="space-y-2 pr-2">
+                      {accounts.map(acc => {
+                        const Icon = getAccountIcon(acc.type)
+                        return (
+                          <Card key={acc.id}>
+                            <CardContent className="p-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-3">
+                                  <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ backgroundColor: acc.color || '#3b82f6' }}>
+                                    <Icon className="w-5 h-5 text-white" />
+                                  </div>
+                                  <div>
+                                    <p className="font-medium">{acc.name}</p>
+                                    <p className="text-xs text-slate-500 capitalize">{acc.type.replace('_', ' ')}</p>
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <p className={`font-bold ${acc.balance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                                    {formatCurrency(acc.balance, acc.currency)}
+                                  </p>
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button variant="ghost" size="icon" className="h-8 w-8 text-red-500"><Trash2 className="w-4 h-4" /></Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent>
+                                      <AlertDialogHeader><AlertDialogTitle>Delete Account</AlertDialogTitle><AlertDialogDescription>This will also delete all transactions.</AlertDialogDescription></AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction className="bg-red-500" onClick={() => handleDeleteAccount(acc.id)}>Delete</AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        )
+                      })}
                     </div>
+                  )}
+                </ScrollArea>
+              </div>
+
+              {/* Contacts Section */}
+              <div className="flex-shrink-0 pt-2 border-t">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-sm font-medium text-slate-500">Contacts</span>
+                  <Button variant="ghost" size="sm" onClick={() => setShowContactDialog(true)}>
+                    <Plus className="w-3 h-3 mr-1" /> Add
+                  </Button>
+                </div>
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {contacts.length === 0 ? (
+                    <p className="text-xs text-slate-400">No contacts</p>
                   ) : (
                     contacts.map(contact => (
-                      <div key={contact.id} className="p-3 rounded-lg border flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
-                          {contact.type === 'person' ? <User className="w-5 h-5" /> : <Building className="w-5 h-5" />}
+                      <div key={contact.id} className="flex-shrink-0 flex items-center gap-2 px-3 py-2 rounded-full bg-slate-100 dark:bg-slate-800">
+                        <div className="w-6 h-6 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center">
+                          {contact.type === 'person' ? <User className="w-3 h-3" /> : <Building className="w-3 h-3" />}
                         </div>
-                        <div className="flex-1">
-                          <p className="font-medium">{contact.name}</p>
-                          <p className="text-xs text-slate-500">{contact.email || contact.phone || 'No contact info'}</p>
-                        </div>
+                        <span className="text-sm">{contact.name}</span>
                       </div>
                     ))
                   )}
                 </div>
-              </CardContent>
-            </Card>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Reports Tab */}
-          <TabsContent value="reports" className="space-y-4 mt-0">
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-emerald-100 text-xs">Total Income</p>
-                  <p className="text-xl font-bold">{formatCurrency(transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0))}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white">
-                <CardContent className="p-4">
-                  <p className="text-amber-100 text-xs">Total Expenses</p>
-                  <p className="text-xl font-bold">{formatCurrency(transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0))}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-blue-100 text-xs">Avg Monthly Income</p>
-                  <p className="text-xl font-bold">{formatCurrency(last6Months.reduce((s, m) => s + m.income, 0) / 6)}</p>
-                </CardContent>
-              </Card>
-              <Card className="bg-gradient-to-br from-purple-500 to-violet-600 text-white">
-                <CardContent className="p-4">
-                  <p className="text-purple-100 text-xs">Avg Monthly Expenses</p>
-                  <p className="text-xl font-bold">{formatCurrency(last6Months.reduce((s, m) => s + m.expense, 0) / 6)}</p>
-                </CardContent>
-              </Card>
-            </div>
+          <TabsContent value="reports" className="flex-1 overflow-hidden m-0 data-[state=inactive]:hidden">
+            <div className="h-full flex flex-col p-4 gap-4 overflow-hidden">
+              <h2 className="text-lg font-semibold flex-shrink-0">Reports</h2>
+              
+              {/* Summary Stats */}
+              <div className="flex-shrink-0 grid grid-cols-2 gap-3">
+                <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+                  <CardContent className="p-3">
+                    <p className="text-emerald-100 text-xs">Total Income</p>
+                    <p className="text-lg font-bold">{formatCurrency(transactions.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0))}</p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-gradient-to-br from-amber-500 to-orange-500 text-white">
+                  <CardContent className="p-3">
+                    <p className="text-amber-100 text-xs">Total Expenses</p>
+                    <p className="text-lg font-bold">{formatCurrency(transactions.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0))}</p>
+                  </CardContent>
+                </Card>
+              </div>
 
-            {/* Trend Chart */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Financial Trend</CardTitle>
-                <CardDescription>Income and Expenses over time</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <ChartContainer config={{}} className="h-64">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={last6Months}>
-                      <CartesianGrid strokeDasharray="3 3" className="stroke-slate-200" />
-                      <XAxis dataKey="month" />
-                      <YAxis />
-                      <ChartTooltip content={<ChartTooltipContent />} />
-                      <Legend />
-                      <Line type="monotone" dataKey="income" stroke="#10b981" strokeWidth={2} dot={{ fill: '#10b981' }} name="Income" />
-                      <Line type="monotone" dataKey="expense" stroke="#f59e0b" strokeWidth={2} dot={{ fill: '#f59e0b' }} name="Expense" />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </ChartContainer>
-              </CardContent>
-            </Card>
-
-            {/* Category Breakdown */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Spending by Category</CardTitle>
-                <CardDescription>Where your money goes</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {expensesByCategory.map((cat, i) => (
-                    <div key={cat.name} className="flex items-center gap-3">
-                      <div className="w-4 h-4 rounded" style={{ backgroundColor: cat.color }} />
-                      <span className="flex-1">{cat.name}</span>
-                      <span className="font-medium">{formatCurrency(cat.value)}</span>
-                      <span className="text-sm text-slate-500">{((cat.value / monthlyExpenses) * 100 || 0).toFixed(1)}%</span>
+              {/* Expense by Category Chart */}
+              <div className="flex-1 min-h-0">
+                <Card className="h-full">
+                  <CardContent className="h-full flex flex-col p-3">
+                    <p className="text-sm font-medium mb-2 flex-shrink-0">Expenses by Category</p>
+                    <div className="flex-1 min-h-0">
+                      {expensesByCategory.length > 0 ? (
+                        <ChartContainer config={{}} className="h-full">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                              <Pie
+                                data={expensesByCategory}
+                                cx="50%"
+                                cy="50%"
+                                innerRadius="40%"
+                                outerRadius="70%"
+                                dataKey="value"
+                              >
+                                {expensesByCategory.map((entry, index) => (
+                                  <Cell key={`cell-${index}`} fill={entry.color} />
+                                ))}
+                              </Pie>
+                              <ChartTooltip content={<ChartTooltipContent />} />
+                            </PieChart>
+                          </ResponsiveContainer>
+                        </ChartContainer>
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-slate-400">
+                          No expense data
+                        </div>
+                      )}
                     </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
+                    {/* Category Legend */}
+                    <div className="flex-shrink-0 mt-2 flex flex-wrap gap-2">
+                      {expensesByCategory.slice(0, 4).map((cat, i) => (
+                        <div key={i} className="flex items-center gap-1 text-xs">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: cat.color }} />
+                          <span className="text-slate-600 dark:text-slate-400">{cat.name}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
         </Tabs>
       </main>
 
+      {/* Floating Add Button - Always visible */}
+      <Button
+        className="fixed bottom-20 right-4 w-14 h-14 rounded-full shadow-lg bg-emerald-500 hover:bg-emerald-600 z-50 md:bottom-4"
+        size="icon"
+        onClick={() => { resetTransactionForm(); setShowTransactionDialog(true); setEditingTransaction(null); }}
+      >
+        <Plus className="w-6 h-6 text-white" />
+      </Button>
+
       {/* Mobile Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-900 border-t md:hidden z-50">
-        <div className="grid grid-cols-5 h-16">
-          <Button variant="ghost" className="flex-col gap-1 h-full rounded-none" onClick={() => setActiveTab('dashboard')}>
-            <LayoutDashboard className={`w-5 h-5 ${activeTab === 'dashboard' ? 'text-emerald-500' : ''}`} />
-            <span className="text-xs">Dashboard</span>
+      <nav className="flex-shrink-0 bg-white dark:bg-slate-900 border-t z-40">
+        <div className="grid grid-cols-5 h-14">
+          <Button variant="ghost" className="flex-col gap-0.5 h-full rounded-none" onClick={() => setActiveTab('dashboard')}>
+            <Home className={`w-5 h-5 ${activeTab === 'dashboard' ? 'text-emerald-500' : ''}`} />
+            <span className="text-[10px]">Home</span>
           </Button>
-          <Button variant="ghost" className="flex-col gap-1 h-full rounded-none" onClick={() => setActiveTab('transactions')}>
+          <Button variant="ghost" className="flex-col gap-0.5 h-full rounded-none" onClick={() => setActiveTab('transactions')}>
             <Receipt className={`w-5 h-5 ${activeTab === 'transactions' ? 'text-emerald-500' : ''}`} />
-            <span className="text-xs">Transactions</span>
+            <span className="text-[10px]">Trans</span>
           </Button>
-          <Button variant="ghost" className="flex-col gap-1 h-full rounded-none" onClick={() => setActiveTab('loans')}>
+          <Button variant="ghost" className="flex-col gap-0.5 h-full rounded-none" onClick={() => setActiveTab('loans')}>
             <HandCoins className={`w-5 h-5 ${activeTab === 'loans' ? 'text-emerald-500' : ''}`} />
-            <span className="text-xs">Loans</span>
+            <span className="text-[10px]">Loans</span>
           </Button>
-          <Button variant="ghost" className="flex-col gap-1 h-full rounded-none" onClick={() => setActiveTab('scheduled')}>
+          <Button variant="ghost" className="flex-col gap-0.5 h-full rounded-none" onClick={() => setActiveTab('scheduled')}>
             <CalendarClock className={`w-5 h-5 ${activeTab === 'scheduled' ? 'text-emerald-500' : ''}`} />
-            <span className="text-xs">Scheduled</span>
+            <span className="text-[10px]">Schedule</span>
           </Button>
-          <Button variant="ghost" className="flex-col gap-1 h-full rounded-none" onClick={() => setActiveTab('reports')}>
-            <BarChart3 className={`w-5 h-5 ${activeTab === 'reports' ? 'text-emerald-500' : ''}`} />
-            <span className="text-xs">Reports</span>
+          <Button variant="ghost" className="flex-col gap-0.5 h-full rounded-none" onClick={() => setActiveTab('accounts')}>
+            <Landmark className={`w-5 h-5 ${activeTab === 'accounts' ? 'text-emerald-500' : ''}`} />
+            <span className="text-[10px]">Accounts</span>
           </Button>
         </div>
       </nav>
+
+      {/* Transaction Dialog */}
+      <Dialog open={showTransactionDialog} onOpenChange={(open) => { setShowTransactionDialog(open); if (!open) { setEditingTransaction(null); resetTransactionForm(); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{editingTransaction ? 'Edit Transaction' : 'Add Transaction'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {/* Validation Errors Summary */}
+            {Object.keys(formErrors).length > 0 && (
+              <div className="p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
+                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium">Please fix the following:</span>
+                </div>
+                <ul className="mt-1 text-xs text-red-500 list-disc list-inside">
+                  {Object.values(formErrors).map((error, i) => (
+                    <li key={i}>{error}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Type Selection */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                variant={transactionForm.type === 'income' ? 'default' : 'outline'}
+                className={transactionForm.type === 'income' ? 'bg-emerald-500 hover:bg-emerald-600' : ''}
+                onClick={() => setTransactionForm(prev => ({ ...prev, type: 'income' }))}
+              >
+                <TrendingUp className="w-4 h-4 mr-1" /> Income
+              </Button>
+              <Button
+                variant={transactionForm.type === 'expense' ? 'default' : 'outline'}
+                className={transactionForm.type === 'expense' ? 'bg-amber-500 hover:bg-amber-600' : ''}
+                onClick={() => setTransactionForm(prev => ({ ...prev, type: 'expense', categoryId: '' }))}
+              >
+                <TrendingDown className="w-4 h-4 mr-1" /> Expense
+              </Button>
+            </div>
+
+            {/* Amount - Required */}
+            <div>
+              <Label className="flex items-center gap-1">
+                Amount <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="number"
+                placeholder="0.00"
+                value={transactionForm.amount}
+                onChange={e => setTransactionForm(prev => ({ ...prev, amount: e.target.value }))}
+                className={formErrors.amount ? 'border-red-500' : ''}
+              />
+              {formErrors.amount && <p className="text-xs text-red-500 mt-1">{formErrors.amount}</p>}
+            </div>
+
+            {/* Date - Required */}
+            <div>
+              <Label className="flex items-center gap-1">
+                Date <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                type="date"
+                value={transactionForm.date}
+                onChange={e => setTransactionForm(prev => ({ ...prev, date: e.target.value }))}
+                className={formErrors.date ? 'border-red-500' : ''}
+              />
+              {formErrors.date && <p className="text-xs text-red-500 mt-1">{formErrors.date}</p>}
+            </div>
+
+            {/* Category - Required */}
+            <div>
+              <Label className="flex items-center gap-1">
+                Category <span className="text-red-500">*</span>
+              </Label>
+              <Select 
+                value={transactionForm.categoryId} 
+                onValueChange={v => setTransactionForm(prev => ({ ...prev, categoryId: v }))}
+              >
+                <SelectTrigger className={formErrors.category ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  {categories.filter(c => c.type === transactionForm.type).map(cat => (
+                    <SelectItem key={cat.id} value={cat.id}>{cat.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formErrors.category && <p className="text-xs text-red-500 mt-1">{formErrors.category}</p>}
+            </div>
+
+            {/* Account */}
+            <div>
+              <Label>Account</Label>
+              <Select 
+                value={transactionForm.accountId} 
+                onValueChange={v => setTransactionForm(prev => ({ ...prev, accountId: v }))}
+              >
+                <SelectTrigger className={formErrors.account ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map(acc => (
+                    <SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formErrors.account && <p className="text-xs text-red-500 mt-1">{formErrors.account}</p>}
+            </div>
+
+            {/* Description */}
+            <div>
+              <Label>Description</Label>
+              <Input
+                placeholder="What was this for?"
+                value={transactionForm.description}
+                onChange={e => setTransactionForm(prev => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+
+            {/* Notes */}
+            <div>
+              <Label>Notes (optional)</Label>
+              <Textarea
+                placeholder="Additional notes..."
+                value={transactionForm.notes}
+                onChange={e => setTransactionForm(prev => ({ ...prev, notes: e.target.value }))}
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowTransactionDialog(false); setEditingTransaction(null); resetTransactionForm(); }}>Cancel</Button>
+            <Button onClick={editingTransaction ? handleUpdateTransaction : handleAddTransaction}>
+              {editingTransaction ? 'Update' : 'Add'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Account Dialog */}
+      <Dialog open={showAccountDialog} onOpenChange={(open) => { setShowAccountDialog(open); if (!open) resetAccountForm(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Add Account</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Account Name</Label>
+              <Input placeholder="e.g., Main Checking" value={accountForm.name} onChange={e => setAccountForm(prev => ({ ...prev, name: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Account Type</Label>
+              <Select value={accountForm.type} onValueChange={v => setAccountForm(prev => ({ ...prev, type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank">Bank Account</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                  <SelectItem value="credit_card">Credit Card</SelectItem>
+                  <SelectItem value="investment">Investment</SelectItem>
+                  <SelectItem value="savings">Savings</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>Initial Balance</Label>
+                <Input type="number" placeholder="0.00" value={accountForm.balance} onChange={e => setAccountForm(prev => ({ ...prev, balance: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Currency</Label>
+                <Select value={accountForm.currency} onValueChange={v => setAccountForm(prev => ({ ...prev, currency: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="USD">USD</SelectItem>
+                    <SelectItem value="EUR">EUR</SelectItem>
+                    <SelectItem value="GBP">GBP</SelectItem>
+                    <SelectItem value="IRR">IRR</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAccountDialog(false)}>Cancel</Button>
+            <Button onClick={handleAddAccount}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Loan Dialog */}
+      <Dialog open={showLoanDialog} onOpenChange={(open) => { setShowLoanDialog(open); if (!open) resetLoanForm(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Add Loan</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant={loanForm.type === 'taken' ? 'default' : 'outline'} className={loanForm.type === 'taken' ? 'bg-red-500 hover:bg-red-600' : ''} onClick={() => setLoanForm(prev => ({ ...prev, type: 'taken' }))}>I Borrowed</Button>
+              <Button variant={loanForm.type === 'given' ? 'default' : 'outline'} className={loanForm.type === 'given' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setLoanForm(prev => ({ ...prev, type: 'given' }))}>I Lent</Button>
+            </div>
+            <div>
+              <Label>Amount</Label>
+              <Input type="number" placeholder="0.00" value={loanForm.principalAmount} onChange={e => setLoanForm(prev => ({ ...prev, principalAmount: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>Interest Rate (%)</Label>
+                <Input type="number" placeholder="0" value={loanForm.interestRate} onChange={e => setLoanForm(prev => ({ ...prev, interestRate: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Due Date</Label>
+                <Input type="date" value={loanForm.dueDate} onChange={e => setLoanForm(prev => ({ ...prev, dueDate: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <Label>Contact (optional)</Label>
+              <Select value={loanForm.contactId} onValueChange={v => setLoanForm(prev => ({ ...prev, contactId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select contact" /></SelectTrigger>
+                <SelectContent>
+                  {contacts.map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Textarea placeholder="Loan details..." value={loanForm.description} onChange={e => setLoanForm(prev => ({ ...prev, description: e.target.value }))} rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLoanDialog(false)}>Cancel</Button>
+            <Button onClick={handleAddLoan}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Debt Dialog */}
+      <Dialog open={showDebtDialog} onOpenChange={(open) => { setShowDebtDialog(open); if (!open) resetDebtForm(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Add Debt/Receivable</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant={debtForm.type === 'payable' ? 'default' : 'outline'} className={debtForm.type === 'payable' ? 'bg-red-500 hover:bg-red-600' : ''} onClick={() => setDebtForm(prev => ({ ...prev, type: 'payable' }))}>I Owe</Button>
+              <Button variant={debtForm.type === 'receivable' ? 'default' : 'outline'} className={debtForm.type === 'receivable' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setDebtForm(prev => ({ ...prev, type: 'receivable' }))}>Owed to Me</Button>
+            </div>
+            <div>
+              <Label>Amount</Label>
+              <Input type="number" placeholder="0.00" value={debtForm.amount} onChange={e => setDebtForm(prev => ({ ...prev, amount: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Due Date</Label>
+              <Input type="date" value={debtForm.dueDate} onChange={e => setDebtForm(prev => ({ ...prev, dueDate: e.target.value }))} />
+            </div>
+            <div>
+              <Label>Contact (optional)</Label>
+              <Select value={debtForm.contactId} onValueChange={v => setDebtForm(prev => ({ ...prev, contactId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select contact" /></SelectTrigger>
+                <SelectContent>
+                  {contacts.map(c => (<SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Textarea placeholder="Details..." value={debtForm.description} onChange={e => setDebtForm(prev => ({ ...prev, description: e.target.value }))} rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowDebtDialog(false)}>Cancel</Button>
+            <Button onClick={handleAddDebt}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Scheduled Payment Dialog */}
+      <Dialog open={showScheduledDialog} onOpenChange={(open) => { setShowScheduledDialog(open); if (!open) resetScheduledForm(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Add Scheduled Payment</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Name</Label>
+              <Input placeholder="e.g., Rent, Salary" value={scheduledForm.name} onChange={e => setScheduledForm(prev => ({ ...prev, name: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button variant={scheduledForm.type === 'income' ? 'default' : 'outline'} className={scheduledForm.type === 'income' ? 'bg-emerald-500 hover:bg-emerald-600' : ''} onClick={() => setScheduledForm(prev => ({ ...prev, type: 'income' }))}>Income</Button>
+              <Button variant={scheduledForm.type === 'expense' ? 'default' : 'outline'} className={scheduledForm.type === 'expense' ? 'bg-amber-500 hover:bg-amber-600' : ''} onClick={() => setScheduledForm(prev => ({ ...prev, type: 'expense' }))}>Expense</Button>
+            </div>
+            <div>
+              <Label>Amount</Label>
+              <Input type="number" placeholder="0.00" value={scheduledForm.amount} onChange={e => setScheduledForm(prev => ({ ...prev, amount: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>Frequency</Label>
+                <Select value={scheduledForm.frequency} onValueChange={v => setScheduledForm(prev => ({ ...prev, frequency: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="daily">Daily</SelectItem>
+                    <SelectItem value="weekly">Weekly</SelectItem>
+                    <SelectItem value="monthly">Monthly</SelectItem>
+                    <SelectItem value="yearly">Yearly</SelectItem>
+                    <SelectItem value="custom">Custom</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {scheduledForm.frequency === 'custom' && (
+                <div>
+                  <Label>Days</Label>
+                  <Input type="number" placeholder="30" value={scheduledForm.customDays} onChange={e => setScheduledForm(prev => ({ ...prev, customDays: e.target.value }))} />
+                </div>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>Start Date</Label>
+                <Input type="date" value={scheduledForm.startDate} onChange={e => setScheduledForm(prev => ({ ...prev, startDate: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Next Due</Label>
+                <Input type="date" value={scheduledForm.nextDueDate} onChange={e => setScheduledForm(prev => ({ ...prev, nextDueDate: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <Label>Account</Label>
+              <Select value={scheduledForm.accountId} onValueChange={v => setScheduledForm(prev => ({ ...prev, accountId: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select account" /></SelectTrigger>
+                <SelectContent>
+                  {accounts.map(acc => (<SelectItem key={acc.id} value={acc.id}>{acc.name}</SelectItem>))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Description</Label>
+              <Textarea placeholder="Details..." value={scheduledForm.description} onChange={e => setScheduledForm(prev => ({ ...prev, description: e.target.value }))} rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowScheduledDialog(false)}>Cancel</Button>
+            <Button onClick={handleAddScheduled}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Contact Dialog */}
+      <Dialog open={showContactDialog} onOpenChange={(open) => { setShowContactDialog(open); if (!open) resetContactForm(); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Add Contact</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label>Name</Label>
+              <Input placeholder="Contact name" value={contactForm.name} onChange={e => setContactForm(prev => ({ ...prev, name: e.target.value }))} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <Label>Email</Label>
+                <Input type="email" placeholder="email@example.com" value={contactForm.email} onChange={e => setContactForm(prev => ({ ...prev, email: e.target.value }))} />
+              </div>
+              <div>
+                <Label>Phone</Label>
+                <Input type="tel" placeholder="+1234567890" value={contactForm.phone} onChange={e => setContactForm(prev => ({ ...prev, phone: e.target.value }))} />
+              </div>
+            </div>
+            <div>
+              <Label>Type</Label>
+              <Select value={contactForm.type} onValueChange={v => setContactForm(prev => ({ ...prev, type: v }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="person">Person</SelectItem>
+                  <SelectItem value="company">Company</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Notes</Label>
+              <Textarea placeholder="Additional notes..." value={contactForm.notes} onChange={e => setContactForm(prev => ({ ...prev, notes: e.target.value }))} rows={2} />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowContactDialog(false)}>Cancel</Button>
+            <Button onClick={handleAddContact}>Add</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
